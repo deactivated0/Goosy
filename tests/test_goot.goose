@@ -237,6 +237,12 @@ fn test_agy_escape_sequences_and_state() {
     assert(ffi::state_load_cols() == 115);
     assert(ffi::state_load_rows() == 38);
 
+    // 5b. CLI argument inspection helpers
+    let _ = ffi::cmdline_cols();
+    let _ = ffi::cmdline_rows();
+    let _ = ffi::cmdline_has_custom_size();
+    let _ = ffi::cmdline_hold();
+
     // 6. Compound SGR with 38;2;...;48;2;... (such as agy banner)
     parser::feed_slice(par, scr, pal, "\x1b[38;2;242;146;46;48;2;246;145;46mX\x1b[m");
     let c_comp = screen::visible_cell(scr, 5, 2);

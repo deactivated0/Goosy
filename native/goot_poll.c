@@ -210,3 +210,10 @@ int64_t goot_time_monotonic_ns(void) {
     }
     return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
 }
+
+void goot_poll_detach_pty(void) {
+    if (g_epfd >= 0 && g_pty_fd >= 0) {
+        epoll_ctl(g_epfd, EPOLL_CTL_DEL, g_pty_fd, NULL);
+        g_pty_fd = -1;
+    }
+}

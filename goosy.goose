@@ -128,6 +128,12 @@ fn main() {
             init_rows = sr;
         }
     }
+    let cmd_cols = ffi::cmdline_cols();
+    let cmd_rows = ffi::cmdline_rows();
+    if cmd_cols >= 10 && cmd_rows >= 3 {
+        init_cols = cmd_cols;
+        init_rows = cmd_rows;
+    }
 
     let init_cw = ffi::font_cell_width();
     let init_ch = ffi::font_cell_height();
@@ -620,7 +626,11 @@ fn main() {
                     parser::feed_slice(par, scr, cfg.palette, pty_buf[..n]);
                     batch += 1;
                 } else if n == 0 {
-                    running = false;
+                    if ffi::cmdline_hold() == 0 {
+                        running = false;
+                    } else {
+                        ffi::poll_detach_pty();
+                    }
                     break;
                 } else {
                     break;
@@ -633,7 +643,15 @@ fn main() {
         }
 
         if (ready & (ffi::POLL_PTY_HUP | ffi::POLL_SIGNAL)) != 0 {
-            if ffi::poll_terminated() != 0 || ffi::pty_check_child() != 0 { running = false; }
+            if ffi::poll_terminated() != 0 {
+                running = false;
+            } else if ffi::pty_check_child() != 0 {
+                if ffi::cmdline_hold() == 0 {
+                    running = false;
+                } else {
+                    ffi::poll_detach_pty();
+                }
+            }
         }
 
         if scr.title_dirty {
@@ -646,7 +664,7 @@ fn main() {
         }
     }
 
-    if cfg.remember_window_size && ffi::wl_is_maximized() == 0 && ffi::wl_is_fullscreen() == 0 {
+    if cfg.remember_window_size && ffi::cmdline_has_custom_size() == 0 && ffi::wl_is_maximized() == 0 && ffi::wl_is_fullscreen() == 0 {
         ffi::state_save_geometry(scr.cols, scr.rows);
     }
 

@@ -677,7 +677,12 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
     g_toplevel = xdg_surface_get_toplevel(g_xdg_surf);
     xdg_toplevel_add_listener(g_toplevel, &g_xdg_toplevel_listener, NULL);
 
-    goot_wl_set_title(title);
+    const char *custom_title = goot_cmdline_title();
+    if (custom_title && custom_title[0] != '\0') {
+        xdg_toplevel_set_title(g_toplevel, custom_title);
+    } else {
+        goot_wl_set_title(title);
+    }
     char aid[128] = "goosy";
     if (app_id.data && app_id.len > 0 && app_id.len < (int64_t)sizeof(aid)) {
         memcpy(aid, app_id.data, (size_t)app_id.len);

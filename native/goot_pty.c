@@ -64,6 +64,147 @@ static const char *resolve_default_shell(char *buf, size_t cap) {
     return "/usr/bin/sh";
 }
 
+/* -------------------------------------------------------------------------
+ * Command-line Argument Parsing (/proc/self/cmdline)
+ * ------------------------------------------------------------------------- */
+static bool    g_cmdline_parsed   = false;
+static int32_t g_cmdline_cols     = 0;
+static int32_t g_cmdline_rows     = 0;
+static bool    g_cmdline_has_size = false;
+static bool    g_cmdline_hold     = false;
+static char    g_cmdline_title[256] = {0};
+static char    g_cmdline_cwd[1024]  = {0};
+static char   *g_cmdline_exec_argv[128];
+static int     g_cmdline_exec_argc  = 0;
+static char    g_cmdline_raw_buf[4096];
+
+static void parse_cmdline_if_needed(void) {
+    if (g_cmdline_parsed) return;
+    g_cmdline_parsed = true;
+
+    int cmd_fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    if (cmd_fd < 0) return;
+    ssize_t n = read(cmd_fd, g_cmdline_raw_buf, sizeof(g_cmdline_raw_buf) - 1);
+    close(cmd_fd);
+    if (n <= 0) return;
+    g_cmdline_raw_buf[n] = '\0';
+
+    char *p = g_cmdline_raw_buf;
+    char *end = g_cmdline_raw_buf + n;
+
+    /* Skip argv[0] */
+    while (p < end && *p != '\0') p++;
+    if (p < end) p++;
+
+    while (p < end && *p != '\0') {
+        if (strncmp(p, "--window-size-chars=", 20) == 0) {
+            int c = 0, r = 0;
+            if (sscanf(p + 20, "%dx%d", &c, &r) == 2 && c >= 10 && r >= 3) {
+                g_cmdline_cols = c;
+                g_cmdline_rows = r;
+                g_cmdline_has_size = true;
+            }
+        } else if (strcmp(p, "--window-size-chars") == 0 || strcmp(p, "-w") == 0) {
+            while (p < end && *p != '\0') p++;
+            if (p < end) p++;
+            if (p < end && *p != '\0') {
+                int c = 0, r = 0;
+                if (sscanf(p, "%dx%d", &c, &r) == 2 && c >= 10 && r >= 3) {
+                    g_cmdline_cols = c;
+                    g_cmdline_rows = r;
+                    g_cmdline_has_size = true;
+                }
+            } else {
+                break;
+            }
+        } else if (strncmp(p, "-w=", 3) == 0) {
+            int c = 0, r = 0;
+            if (sscanf(p + 3, "%dx%d", &c, &r) == 2 && c >= 10 && r >= 3) {
+                g_cmdline_cols = c;
+                g_cmdline_rows = r;
+                g_cmdline_has_size = true;
+            }
+        } else if (strncmp(p, "--title=", 8) == 0) {
+            strncpy(g_cmdline_title, p + 8, sizeof(g_cmdline_title) - 1);
+        } else if (strcmp(p, "--title") == 0 || strcmp(p, "-T") == 0) {
+            while (p < end && *p != '\0') p++;
+            if (p < end) p++;
+            if (p < end && *p != '\0') {
+                strncpy(g_cmdline_title, p, sizeof(g_cmdline_title) - 1);
+            } else {
+                break;
+            }
+        } else if (strncmp(p, "-T=", 3) == 0) {
+            strncpy(g_cmdline_title, p + 3, sizeof(g_cmdline_title) - 1);
+        } else if (strncmp(p, "--working-directory=", 20) == 0) {
+            strncpy(g_cmdline_cwd, p + 20, sizeof(g_cmdline_cwd) - 1);
+        } else if (strcmp(p, "--working-directory") == 0 || strcmp(p, "-D") == 0) {
+            while (p < end && *p != '\0') p++;
+            if (p < end) p++;
+            if (p < end && *p != '\0') {
+                strncpy(g_cmdline_cwd, p, sizeof(g_cmdline_cwd) - 1);
+            } else {
+                break;
+            }
+        } else if (strncmp(p, "-D=", 3) == 0) {
+            strncpy(g_cmdline_cwd, p + 3, sizeof(g_cmdline_cwd) - 1);
+        } else if (strcmp(p, "--hold") == 0) {
+            g_cmdline_hold = true;
+        } else if (strcmp(p, "-e") == 0 || strcmp(p, "--") == 0) {
+            while (p < end && *p != '\0') p++;
+            if (p < end) p++;
+            while (p < end && *p != '\0' && g_cmdline_exec_argc < 120) {
+                g_cmdline_exec_argv[g_cmdline_exec_argc++] = p;
+                while (p < end && *p != '\0') p++;
+                if (p < end) p++;
+            }
+            break;
+        } else if (p[0] != '-') {
+            while (p < end && *p != '\0' && g_cmdline_exec_argc < 120) {
+                g_cmdline_exec_argv[g_cmdline_exec_argc++] = p;
+                while (p < end && *p != '\0') p++;
+                if (p < end) p++;
+            }
+            break;
+        }
+
+        while (p < end && *p != '\0') p++;
+        if (p < end) p++;
+    }
+
+    g_cmdline_exec_argv[g_cmdline_exec_argc] = NULL;
+}
+
+int32_t goot_cmdline_cols(void) {
+    parse_cmdline_if_needed();
+    return g_cmdline_cols;
+}
+
+int32_t goot_cmdline_rows(void) {
+    parse_cmdline_if_needed();
+    return g_cmdline_rows;
+}
+
+int32_t goot_cmdline_has_custom_size(void) {
+    parse_cmdline_if_needed();
+    return g_cmdline_has_size ? 1 : 0;
+}
+
+int32_t goot_cmdline_hold(void) {
+    parse_cmdline_if_needed();
+    return g_cmdline_hold ? 1 : 0;
+}
+
+const char *goot_cmdline_title(void) {
+    parse_cmdline_if_needed();
+    return g_cmdline_title[0] != '\0' ? g_cmdline_title : NULL;
+}
+
+const char *goot_cmdline_cwd(void) {
+    parse_cmdline_if_needed();
+    return g_cmdline_cwd[0] != '\0' ? g_cmdline_cwd : NULL;
+}
+
 int32_t goot_pty_spawn(goot_const_bytes_t shell_override,
                        goot_const_bytes_t term_env,
                        int32_t cols, int32_t rows,
@@ -169,8 +310,32 @@ int32_t goot_pty_spawn(goot_const_bytes_t shell_override,
         unsetenv("TERMCAP");
         setenv("TERM", term_str, 1);
         setenv("COLORTERM", "truecolor", 1);
-        setenv("TERM_PROGRAM", "goot", 1);
+        setenv("TERM_PROGRAM", "goosy", 1);
         setenv("TERM_PROGRAM_VERSION", "0.2.0", 1);
+
+        /* Apply pre-parsed CLI arguments (--working-directory, -e, trailing command) */
+        parse_cmdline_if_needed();
+
+        if (g_cmdline_cwd[0] != '\0') {
+            const char *target_cwd = g_cmdline_cwd;
+            if (target_cwd[0] == '~') {
+                const char *h = getenv("HOME");
+                if (h && target_cwd[1] == '/') {
+                    char expanded[1024];
+                    snprintf(expanded, sizeof(expanded), "%s%s", h, target_cwd + 1);
+                    (void)chdir(expanded);
+                } else if (h && target_cwd[1] == '\0') {
+                    (void)chdir(h);
+                }
+            } else {
+                (void)chdir(target_cwd);
+            }
+        }
+
+        if (g_cmdline_exec_argc > 0) {
+            execvp(g_cmdline_exec_argv[0], g_cmdline_exec_argv);
+            _exit(127);
+        }
 
         const char *base = strrchr(shell_path, '/');
         const char *arg0 = base ? base + 1 : shell_path;

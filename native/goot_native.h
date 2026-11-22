@@ -219,10 +219,19 @@ void    goot_image_clear(void);
 /* -------------------------------------------------------------------------
  * Config / Environment Helper API (native/goot_pty.c)
  * ------------------------------------------------------------------------- */
-int64_t goot_env_get(goot_const_bytes_t name, goot_bytes_t out_buf);
-int64_t goot_file_read(goot_const_bytes_t path, goot_bytes_t out_buf);
-int32_t goot_state_load_cols(void);
-int32_t goot_state_load_rows(void);
-void    goot_state_save_geometry(int32_t cols, int32_t rows);
+int64_t     goot_env_get(goot_const_bytes_t name, goot_bytes_t out_buf);
+int64_t     goot_file_read(goot_const_bytes_t path, goot_bytes_t out_buf);
+int32_t     goot_state_load_cols(void);
+int32_t     goot_state_load_rows(void);
+void        goot_state_save_geometry(int32_t cols, int32_t rows);
+
+/* Command-line inspection helpers (native/goot_pty.c & goot_poll.c) */
+int32_t     goot_cmdline_cols(void);
+int32_t     goot_cmdline_rows(void);
+int32_t     goot_cmdline_has_custom_size(void);
+int32_t     goot_cmdline_hold(void);
+const char *goot_cmdline_title(void);
+const char *goot_cmdline_cwd(void);
+void        goot_poll_detach_pty(void);
 
 #endif /* GOOT_NATIVE_H */
