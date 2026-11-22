@@ -204,6 +204,40 @@ fn test_underlines_hyperlinks_and_reflow() {
     assert(reflow_scr.wrapped_rows[0] == 0);
 }
 
+fn test_agy_escape_sequences_and_state() {
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 80, 24, pal.fg, pal.bg, 20, 0);
+    var par = parser::Parser { .. };
+
+    // 1. CSI > 4;2m (modifyOtherKeys) must NOT trigger underline
+    parser::feed_slice(par, scr, pal, "\x1b[>4;2mHello\x1b[m");
+    let c0 = screen::visible_cell(scr, 0, 0);
+    assert((c0.attrs & screen::ATTR_UNDERLINE) == 0);
+    assert(c0.ul_style == screen::UL_NONE);
+
+    // 2. CSI > 5 u and CSI ? u must NOT jump cursor
+    scr.saved_cx = 50; scr.saved_cy = 20;
+    scr.cx = 5; scr.cy = 2;
+    parser::feed_slice(par, scr, pal, "\x1b[>5u\x1b[?u");
+    assert(scr.cx == 5 && scr.cy == 2); // Not jumped to 50, 20
+
+    // 3. OSC 11 background query reply
+    scr.reply_buf.clear();
+    parser::feed_slice(par, scr, pal, "\x1b]11;?\x07");
+    assert(scr.reply_buf.len > 0);
+
+    // 4. Window size report CSI 14 t
+    scr.reply_buf.clear();
+    parser::feed_slice(par, scr, pal, "\x1b[14t");
+    assert(scr.reply_buf.len > 0);
+
+    // 5. Persistent geometry save & load
+    ffi::state_save_geometry(115, 38);
+    assert(ffi::state_load_cols() == 115);
+    assert(ffi::state_load_rows() == 38);
+}
+
 fn main() {
     test_utf8_decoding();
     test_osc7_and_osc133_prompt_jumps();
@@ -212,5 +246,6 @@ fn main() {
     test_shortcuts_and_goot_ini();
     test_fastfetch_alignment_and_box_drawing();
     test_underlines_hyperlinks_and_reflow();
+    test_agy_escape_sequences_and_state();
     print("goot: all Goose unit tests passed");
 }

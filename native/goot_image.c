@@ -8,8 +8,10 @@
 #include "goot_image.h"
 
 #include <png.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define MAX_ACTIVE_IMAGES 128
 
@@ -410,6 +412,7 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
     int32_t format = 32; /* 32 = RGBA, 24 = RGB, 100 = PNG */
     int32_t width = 0, height = 0;
     int32_t action = 't';
+    int32_t image_id = 0;
 
     /* Parse control keys until ';' */
     int64_t semi = -1;
@@ -423,14 +426,29 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
         uint8_t key = data.data[p++];
         if (p < semi && data.data[p] == '=') p++;
         int32_t val = 0;
-        while (p < semi && data.data[p] >= '0' && data.data[p] <= '9') {
-            val = val * 10 + (data.data[p++] - '0');
+        int32_t char_val = 0;
+        if (p < semi && data.data[p] >= 'a' && data.data[p] <= 'z') {
+            char_val = data.data[p++];
+        } else {
+            while (p < semi && data.data[p] >= '0' && data.data[p] <= '9') {
+                val = val * 10 + (data.data[p++] - '0');
+            }
         }
-        if (key == 'a') action = val != 0 ? val : data.data[p - 1];
+        if (key == 'a') action = char_val != 0 ? char_val : val;
+        else if (key == 'i') image_id = val;
         else if (key == 'f') format = val;
         else if (key == 's') width = val;
         else if (key == 'v') height = val;
         while (p < semi && data.data[p] == ',') p++;
+    }
+
+    if (action == 'q') {
+        char rep[64];
+        int rlen = snprintf(rep, sizeof(rep), "\x1b_Gi=%d;OK\x1b\\", (int)image_id);
+        if (rlen > 0 && goot_pty_fd() >= 0) {
+            (void)write(goot_pty_fd(), rep, (size_t)rlen);
+        }
+        return 0;
     }
 
     if (action == 'd') {

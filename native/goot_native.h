@@ -221,5 +221,8 @@ void    goot_image_clear(void);
  * ------------------------------------------------------------------------- */
 int64_t goot_env_get(goot_const_bytes_t name, goot_bytes_t out_buf);
 int64_t goot_file_read(goot_const_bytes_t path, goot_bytes_t out_buf);
+int32_t goot_state_load_cols(void);
+int32_t goot_state_load_rows(void);
+void    goot_state_save_geometry(int32_t cols, int32_t rows);
 
 #endif /* GOOT_NATIVE_H */

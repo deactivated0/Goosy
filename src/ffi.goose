@@ -126,6 +126,9 @@ extern fn kitty_graphics(data: const u8[:], col: i32, abs_row: i32, cell_w: i32,
 extern fn image_scroll(evicted_lines: i32) = "goot_image_scroll";
 extern fn image_clear() = "goot_image_clear";
 
-// Environment & Config File Helpers
+// Environment, State & Config File Helpers
 extern fn env_get(name: const u8[:], out_buf: u8[:]) -> i64 = "goot_env_get";
 extern fn file_read(path: const u8[:], out_buf: u8[:]) -> i64 = "goot_file_read";
+extern fn state_load_cols() -> i32 = "goot_state_load_cols";
+extern fn state_load_rows() -> i32 = "goot_state_load_rows";
+extern fn state_save_geometry(cols: i32, rows: i32) = "goot_state_save_geometry";

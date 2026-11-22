@@ -514,3 +514,84 @@ int64_t goot_file_read(goot_const_bytes_t path, goot_bytes_t out_buf) {
     close(fd);
     return total;
 }
+
+/* -------------------------------------------------------------------------
+ * Persistent Window Geometry State (~/.local/state/goot/window_geometry)
+ * ------------------------------------------------------------------------- */
+static void get_state_geometry_path(char *out, size_t cap) {
+    const char *state_home = getenv("XDG_STATE_HOME");
+    if (state_home && state_home[0] == '/') {
+        snprintf(out, cap, "%s/goot/window_geometry", state_home);
+    } else {
+        const char *home = getenv("HOME");
+        if (!home || home[0] != '/') home = "/tmp";
+        snprintf(out, cap, "%s/.local/state/goot/window_geometry", home);
+    }
+}
+
+static int32_t g_saved_cols = 0;
+static int32_t g_saved_rows = 0;
+static bool    g_state_loaded = false;
+
+static void load_state_if_needed(void) {
+    if (g_state_loaded) return;
+    g_state_loaded = true;
+    char path[1024];
+    get_state_geometry_path(path, sizeof(path));
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return;
+    char buf[64];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return;
+    buf[n] = '\0';
+    int c = 0, r = 0;
+    if (sscanf(buf, "%d %d", &c, &r) == 2) {
+        if (c >= 20 && c <= 500 && r >= 5 && r <= 200) {
+            g_saved_cols = (int32_t)c;
+            g_saved_rows = (int32_t)r;
+        }
+    }
+}
+
+int32_t goot_state_load_cols(void) {
+    load_state_if_needed();
+    return g_saved_cols;
+}
+
+int32_t goot_state_load_rows(void) {
+    load_state_if_needed();
+    return g_saved_rows;
+}
+
+void goot_state_save_geometry(int32_t cols, int32_t rows) {
+    if (cols < 20 || rows < 5 || cols > 500 || rows > 200) return;
+    char path[1024];
+    get_state_geometry_path(path, sizeof(path));
+
+    char dir[1024];
+    strncpy(dir, path, sizeof(dir) - 1);
+    dir[sizeof(dir) - 1] = '\0';
+    char *slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = '\0';
+        char pdir[1024];
+        strncpy(pdir, dir, sizeof(pdir) - 1);
+        pdir[sizeof(pdir) - 1] = '\0';
+        char *pslash = strrchr(pdir, '/');
+        if (pslash) {
+            *pslash = '\0';
+            mkdir(pdir, 0755);
+        }
+        mkdir(dir, 0755);
+    }
+
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+    char buf[64];
+    int len = snprintf(buf, sizeof(buf), "%d %d\n", (int)cols, (int)rows);
+    if (len > 0) {
+        (void)write(fd, buf, (size_t)len);
+    }
+    close(fd);
+}

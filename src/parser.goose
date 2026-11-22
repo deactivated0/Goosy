@@ -27,9 +27,11 @@ root struct Parser {
     state: i32 = 0,
     utf8_dec: utf8::Decoder = utf8::Decoder { .. },
     params: i32[16] = [0; 16],
+    is_subparam: bool[16] = [false; 16],
     param_count: i32 = 0,
     cur_param: i32 = 0,
     has_param: bool = false,
+    next_is_sub: bool = false,
     private_prefix: u8 = 0,
     intermediate: u8 = 0,
     osc_esc_seen: bool = false,
@@ -45,6 +47,7 @@ fn init(p: Parser&, allow_osc52: bool) {
     p.param_count = 0;
     p.cur_param = 0;
     p.has_param = false;
+    p.next_is_sub = false;
     p.private_prefix = 0;
     p.intermediate = 0;
     p.osc_esc_seen = false;
@@ -53,13 +56,15 @@ fn init(p: Parser&, allow_osc52: bool) {
     p.dcs_buf.clear();
     p.apc_buf.clear();
     p.allow_osc52 = allow_osc52;
+    for i in 0..MAX_PARAMS { p.params[i] = 0; p.is_subparam[i] = false; }
 }
 
 fn clear_csi(p: Parser&) {
-    for i in 0..MAX_PARAMS { p.params[i] = 0; }
+    for i in 0..MAX_PARAMS { p.params[i] = 0; p.is_subparam[i] = false; }
     p.param_count = 0;
     p.cur_param = 0;
     p.has_param = false;
+    p.next_is_sub = false;
     p.private_prefix = 0;
     p.intermediate = 0;
 }
@@ -73,6 +78,7 @@ fn param_or(p: Parser&, idx: i32, def: i32) -> i32 {
 fn apply_sgr(p: Parser&, s: screen::Screen&, pal: colors::Palette&) {
     if p.param_count == 0 {
         s.cur_fg = pal.fg; s.cur_bg = pal.bg; s.cur_attrs = 0;
+        s.cur_ul_style = screen::UL_NONE; s.cur_ul_color = 0;
         return;
     }
 
@@ -80,12 +86,15 @@ fn apply_sgr(p: Parser&, s: screen::Screen&, pal: colors::Palette&) {
     while i < p.param_count {
         let code = p.params[i];
         match code {
-            0 => { s.cur_fg = pal.fg; s.cur_bg = pal.bg; s.cur_attrs = 0; },
+            0 => {
+                s.cur_fg = pal.fg; s.cur_bg = pal.bg; s.cur_attrs = 0;
+                s.cur_ul_style = screen::UL_NONE; s.cur_ul_color = 0;
+            },
             1 => { s.cur_attrs = s.cur_attrs | screen::ATTR_BOLD; },
             2 => { s.cur_attrs = s.cur_attrs | screen::ATTR_DIM; },
             3 => { s.cur_attrs = s.cur_attrs | screen::ATTR_ITALIC; },
             4 => {
-                if i + 1 < p.param_count && (p.params[i + 1] >= 0 && p.params[i + 1] <= 5) {
+                if i + 1 < p.param_count && p.is_subparam[i + 1] && (p.params[i + 1] >= 0 && p.params[i + 1] <= 5) {
                     let sub = p.params[i + 1];
                     if sub == 0 {
                         s.cur_attrs = s.cur_attrs & ~screen::ATTR_UNDERLINE;
@@ -109,6 +118,7 @@ fn apply_sgr(p: Parser&, s: screen::Screen&, pal: colors::Palette&) {
             24 => {
                 s.cur_attrs = s.cur_attrs & ~screen::ATTR_UNDERLINE;
                 s.cur_ul_style = screen::UL_NONE;
+                s.cur_ul_color = 0;
             },
             25 => { s.cur_attrs = s.cur_attrs & ~screen::ATTR_BLINK; },
             27 => { s.cur_attrs = s.cur_attrs & ~screen::ATTR_INVERSE; },
@@ -193,6 +203,7 @@ fn push_reply_int(out: u8[>..]&, v: i32) {
 fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: u8) {
     if p.has_param && p.param_count < MAX_PARAMS {
         p.params[p.param_count] = p.cur_param;
+        p.is_subparam[p.param_count] = p.next_is_sub;
         p.param_count += 1;
     }
 
@@ -200,7 +211,26 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
         if final_b == 'h' || final_b == 'l' {
             let enable = (final_b == 'h');
             for i in 0..p.param_count { apply_dec_private_mode(s, p.params[i], enable); }
+        } else if final_b == 'u' {
+            s.reply_buf.append("\x1b[?0u");
+        } else if p.intermediate == '$' && final_b == 'p' {
+            if p.param_count > 0 {
+                s.reply_buf.append("\x1b[?");
+                push_reply_int(s.reply_buf, p.params[0]);
+                s.reply_buf.append(";0$y");
+            }
         }
+        return;
+    }
+
+    if p.private_prefix == '>' {
+        if final_b == 'c' {
+            s.reply_buf.append("\x1b[>0;10;0c");
+        }
+        return;
+    }
+
+    if p.private_prefix != 0 {
         return;
     }
 
@@ -213,6 +243,10 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
             _ => {},
         }
         screen::mark_row_dirty(s, s.cy);
+        return;
+    }
+
+    if p.intermediate != 0 {
         return;
     }
 
@@ -263,6 +297,23 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
             }
         },
         'c' => { if p.private_prefix == 0 { s.reply_buf.append("\x1b[?62;22c"); } },
+        't' => {
+            if p.param_count > 0 && p.params[0] == 14 {
+                let cw = ffi::font_cell_width();
+                let ch = ffi::font_cell_height();
+                s.reply_buf.append("\x1b[4;");
+                push_reply_int(s.reply_buf, s.rows * ch);
+                s.reply_buf.push(';');
+                push_reply_int(s.reply_buf, s.cols * cw);
+                s.reply_buf.push('t');
+            } else if p.param_count > 0 && p.params[0] == 18 {
+                s.reply_buf.append("\x1b[8;");
+                push_reply_int(s.reply_buf, s.rows);
+                s.reply_buf.push(';');
+                push_reply_int(s.reply_buf, s.cols);
+                s.reply_buf.push('t');
+            }
+        },
         _ => {},
     }
 }
@@ -304,6 +355,18 @@ fn parse_osc7_cwd(s: screen::Screen&, uri: const u8[:]) {
     }
 }
 
+fn hex_nibble(v: u32) -> u8 {
+    let nib = (v & 0xF) as u8;
+    return if nib < 10 { '0' + nib } else { 'a' + (nib - 10) };
+}
+
+fn push_reply_hex2(out: u8[>..]&, v: u32) {
+    let byte_val = v & 0xFF;
+    let hi = hex_nibble(byte_val >> 4);
+    let lo = hex_nibble(byte_val & 0xF);
+    out.push(hi); out.push(lo); out.push(hi); out.push(lo);
+}
+
 fn dispatch_osc(p: Parser&, s: screen::Screen&) {
     if p.osc_buf.len < 2 { return; }
     var semi: i64 = -1;
@@ -343,6 +406,26 @@ fn dispatch_osc(p: Parser&, s: screen::Screen&) {
             } else {
                 s.cur_link_id = screen::add_hyperlink(s, url);
             }
+        }
+    } else if cmd == 10 {
+        if payload.len >= 1 && payload[0] == '?' {
+            s.reply_buf.append("\x1b]10;rgb:");
+            push_reply_hex2(s.reply_buf, (s.default_fg >> 16) & 0xFF);
+            s.reply_buf.push('/');
+            push_reply_hex2(s.reply_buf, (s.default_fg >> 8) & 0xFF);
+            s.reply_buf.push('/');
+            push_reply_hex2(s.reply_buf, s.default_fg & 0xFF);
+            s.reply_buf.append("\x1b\\");
+        }
+    } else if cmd == 11 {
+        if payload.len >= 1 && payload[0] == '?' {
+            s.reply_buf.append("\x1b]11;rgb:");
+            push_reply_hex2(s.reply_buf, (s.default_bg >> 16) & 0xFF);
+            s.reply_buf.push('/');
+            push_reply_hex2(s.reply_buf, (s.default_bg >> 8) & 0xFF);
+            s.reply_buf.push('/');
+            push_reply_hex2(s.reply_buf, s.default_bg & 0xFF);
+            s.reply_buf.append("\x1b\\");
         }
     } else if cmd == 133 {
         // Shell integration: OSC 133;A marks prompt start for Ctrl+Shift+Z/X
@@ -418,8 +501,15 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
         }
         if b == ';' || b == ':' {
             p.state = ST_CSI_PARAM;
-            if p.param_count < MAX_PARAMS { p.params[p.param_count] = p.cur_param; p.param_count += 1; }
-            p.cur_param = 0; p.has_param = false; return;
+            if p.param_count < MAX_PARAMS {
+                p.params[p.param_count] = p.cur_param;
+                p.is_subparam[p.param_count] = p.next_is_sub;
+                p.param_count += 1;
+            }
+            p.cur_param = 0;
+            p.has_param = false;
+            p.next_is_sub = (b == ':');
+            return;
         }
         if b >= 0x20 && b <= 0x2F { p.intermediate = b; p.state = ST_CSI_PARAM; return; }
         if b >= 0x40 && b <= 0x7E { dispatch_csi(p, s, pal, b); p.state = ST_GROUND; return; }
@@ -450,12 +540,16 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
 
     if p.state == ST_DCS_DATA {
         if b == 0x07 {
-            let cw = ffi::font_cell_width();
-            let ch = ffi::font_cell_height();
-            let abs_r = if s.alt_screen { s.cy } else { s.sb_count + s.cy };
-            let rows_cov = ffi::sixel_decode(p.dcs_buf, s.cx, abs_r, cw, ch);
-            if rows_cov > 0 {
-                for _ in 0..rows_cov { screen::linefeed(s); }
+            if p.dcs_buf.len > 0 && p.dcs_buf[0] == 'q' {
+                let cw = ffi::font_cell_width();
+                let ch = ffi::font_cell_height();
+                let abs_r = if s.alt_screen { s.cy } else { s.sb_count + s.cy };
+                let rows_cov = ffi::sixel_decode(p.dcs_buf, s.cx, abs_r, cw, ch);
+                if rows_cov > 0 {
+                    for _ in 0..rows_cov { screen::linefeed(s); }
+                }
+            } else if p.dcs_buf.len >= 2 && p.dcs_buf[0] == '+' && p.dcs_buf[1] == 'q' {
+                s.reply_buf.append("\x1bP0+r\x1b\\");
             }
             p.state = ST_GROUND;
             return;
@@ -463,12 +557,16 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
         if p.esc_seen {
             p.esc_seen = false;
             if b == '\\' {
-                let cw = ffi::font_cell_width();
-                let ch = ffi::font_cell_height();
-                let abs_r = if s.alt_screen { s.cy } else { s.sb_count + s.cy };
-                let rows_cov = ffi::sixel_decode(p.dcs_buf, s.cx, abs_r, cw, ch);
-                if rows_cov > 0 {
-                    for _ in 0..rows_cov { screen::linefeed(s); }
+                if p.dcs_buf.len > 0 && p.dcs_buf[0] == 'q' {
+                    let cw = ffi::font_cell_width();
+                    let ch = ffi::font_cell_height();
+                    let abs_r = if s.alt_screen { s.cy } else { s.sb_count + s.cy };
+                    let rows_cov = ffi::sixel_decode(p.dcs_buf, s.cx, abs_r, cw, ch);
+                    if rows_cov > 0 {
+                        for _ in 0..rows_cov { screen::linefeed(s); }
+                    }
+                } else if p.dcs_buf.len >= 2 && p.dcs_buf[0] == '+' && p.dcs_buf[1] == 'q' {
+                    s.reply_buf.append("\x1bP0+r\x1b\\");
                 }
                 p.state = ST_GROUND;
                 return;

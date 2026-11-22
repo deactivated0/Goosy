@@ -118,11 +118,22 @@ fn main() {
     }
     defer ffi::font_close();
 
+    var init_cols = cfg.initial_cols;
+    var init_rows = cfg.initial_rows;
+    if cfg.remember_window_size {
+        let sc = ffi::state_load_cols();
+        let sr = ffi::state_load_rows();
+        if sc >= 20 && sr >= 5 {
+            init_cols = sc;
+            init_rows = sr;
+        }
+    }
+
     let init_cw = ffi::font_cell_width();
     let init_ch = ffi::font_cell_height();
     let init_title_h = if cfg.title_bar { cfg.title_bar_height } else { 0 };
-    let init_w  = cfg.initial_cols * init_cw + 2 * cfg.padding;
-    let init_h  = cfg.initial_rows * init_ch + 2 * cfg.padding + init_title_h;
+    let init_w  = init_cols * init_cw + 2 * cfg.padding;
+    let init_h  = init_rows * init_ch + 2 * cfg.padding + init_title_h;
 
     guard ffi::wl_init(cfg.title, "goot", init_w, init_h) == 0 else {
         print("goot: failed to initialize Wayland display (is WAYLAND_DISPLAY set?)");
@@ -133,13 +144,13 @@ fn main() {
     ffi::wl_set_decoration_mode(cfg.decorations);
 
     var scr = screen::Screen { .. };
-    screen::init(scr, cfg.initial_cols, cfg.initial_rows,
+    screen::init(scr, init_cols, init_rows,
                  cfg.palette.fg, cfg.palette.bg,
                  cfg.scrollback_lines, cfg.cursor_style);
     var par = parser::Parser { allow_osc52: cfg.allow_osc52, .. };
     var mstate = modes::new_state();
 
-    guard ffi::pty_spawn("", "xterm-256color", scr.cols, scr.rows, cfg.initial_cols * init_cw, cfg.initial_rows * init_ch) == 0 else {
+    guard ffi::pty_spawn("", "xterm-256color", scr.cols, scr.rows, init_cols * init_cw, init_rows * init_ch) == 0 else {
         print("goot: failed to spawn PTY shell");
         exit(1);
     }
@@ -219,6 +230,9 @@ fn main() {
                     screen::resize(scr, nc, nr);
                     let content_h = h * sc - title_h;
                     ffi::pty_resize(nc, nr, w * sc, if content_h > 0 { content_h } else { 0 });
+                    if cfg.remember_window_size && ffi::wl_is_maximized() == 0 && ffi::wl_is_fullscreen() == 0 {
+                        ffi::state_save_geometry(nc, nr);
+                    }
                 } else {
                     screen::mark_all_dirty(scr);
                 }
@@ -353,7 +367,8 @@ fn main() {
                 let win_logical_w = ffi::wl_width();
                 let win_logical_h = ffi::wl_height();
                 let is_resizable = (ffi::wl_is_maximized() == 0) && (ffi::wl_is_fullscreen() == 0);
-                let resize_edge = if is_resizable { hit_test_resize(ptr_x, ptr_y, win_logical_w, win_logical_h, 7) } else { RESIZE_NONE };
+                let resize_margin: i32 = if cfg.padding > 2 { 2 } else { 1 };
+                let resize_edge = if is_resizable { hit_test_resize(ptr_x, ptr_y, win_logical_w, win_logical_h, resize_margin) } else { RESIZE_NONE };
 
                 if drag_left {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
@@ -407,7 +422,8 @@ fn main() {
                 let win_logical_w = ffi::wl_width();
                 let win_logical_h = ffi::wl_height();
                 let is_resizable = (ffi::wl_is_maximized() == 0) && (ffi::wl_is_fullscreen() == 0);
-                let resize_edge = if is_resizable { hit_test_resize(ptr_x, ptr_y, win_logical_w, win_logical_h, 7) } else { RESIZE_NONE };
+                let resize_margin: i32 = if cfg.padding > 2 { 2 } else { 1 };
+                let resize_edge = if is_resizable { hit_test_resize(ptr_x, ptr_y, win_logical_w, win_logical_h, resize_margin) } else { RESIZE_NONE };
 
                 if resize_edge != RESIZE_NONE && btn == 272 && pressed && !drag_left && !drag_right {
                     ffi::wl_toplevel_resize(resize_edge);
@@ -485,8 +501,16 @@ fn main() {
                         } else {
                             drag_left = false;
                             if scr.sel_active {
-                                screen::extract_selection(scr, sel_out);
-                                if sel_out.len > 0 { ffi::wl_primary_set(sel_out); }
+                                if click_count == 1 && scr.sel_x0 == scr.sel_x1 && scr.sel_y0 == scr.sel_y1 {
+                                    scr.sel_active = false;
+                                    screen::mark_all_dirty(scr);
+                                } else {
+                                    screen::extract_selection(scr, sel_out);
+                                    if sel_out.len > 0 {
+                                        ffi::wl_primary_set(sel_out);
+                                        ffi::wl_clipboard_set(sel_out);
+                                    }
+                                }
                             }
                         }
                     } else if btn == 274 { // Middle click: paste from primary selection
@@ -500,7 +524,10 @@ fn main() {
                             drag_right = false;
                             if scr.sel_active {
                                 screen::extract_selection(scr, sel_out);
-                                if sel_out.len > 0 { ffi::wl_primary_set(sel_out); }
+                                if sel_out.len > 0 {
+                                    ffi::wl_primary_set(sel_out);
+                                    ffi::wl_clipboard_set(sel_out);
+                                }
                             }
                         }
                     }
@@ -617,6 +644,10 @@ fn main() {
             renderer::draw_frame(scr, cfg, mstate, focused, hover_btn, pressed_btn);
             scr.title_dirty = false;
         }
+    }
+
+    if cfg.remember_window_size && ffi::wl_is_maximized() == 0 && ffi::wl_is_fullscreen() == 0 {
+        ffi::state_save_geometry(scr.cols, scr.rows);
     }
 
     ffi::pty_close();

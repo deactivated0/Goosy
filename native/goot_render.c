@@ -330,8 +330,8 @@ void goot_render_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h
         }
     }
 
-    /* 3. Underline (bit 2 or ul_style > 0) */
-    if ((attr_flags & (1U << 2)) || ul_style > 0) {
+    /* 3. Underline (bit 2) */
+    if ((attr_flags & (1U << 2)) != 0) {
         uint32_t ucol = (ul_color != 0) ? ul_color : fg_rgb;
         int32_t uy = py + goot_font_baseline() + 2;
         if (uy >= py + cell_h) uy = py + cell_h - 1;

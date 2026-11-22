@@ -31,6 +31,7 @@ struct Config {
     title_bar: bool = true,
     title_bar_height: i32 = 28,
     decorations: i32 = DECO_CLIENT, // 0=auto, 1=server, 2=client, 3=none
+    remember_window_size: bool = true,
     palette: colors::Palette = colors::Palette { .. },
 }
 
@@ -137,6 +138,8 @@ fn apply_kv(cfg: Config&, section: const u8[:], key: const u8[:], raw_val: const
         } else if eq_str(key, "title-bar-height") || eq_str(key, "title_bar_height") {
             let n, ok = parse_i32(val);
             if ok && n >= 16 && n <= 64 { cfg.title_bar_height = n; }
+        } else if eq_str(key, "remember-window-size") || eq_str(key, "remember_window_size") {
+            cfg.remember_window_size = eq_str(val, "true") || eq_str(val, "yes") || eq_str(val, "1");
         }
     } else if eq_str(section, "cursor") {
         if eq_str(key, "style") {
