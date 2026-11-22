@@ -402,11 +402,21 @@ static void load_title_icon_once(void) {
     if (g_title_icon_attempted) return;
     g_title_icon_attempted = true;
 
+    char desktop_icon[1024] = {0};
+    char local_icon[1024] = {0};
+    const char *h = getenv("HOME");
+    if (h && h[0] == '/') {
+        snprintf(desktop_icon, sizeof(desktop_icon), "%s/Desktop/goot.png", h);
+        snprintf(local_icon, sizeof(local_icon), "%s/.local/share/pixmaps/goosy.png", h);
+    }
+
     const char *candidates[] = {
-        "/home/pc/Desktop/goot.png",
-        "/home/pc/.local/share/pixmaps/goosy.png",
-        "/home/pc/builds/goot/assets/goosy.png",
-        "/home/pc/builds/goot/assets/goot.png",
+        desktop_icon[0] ? desktop_icon : NULL,
+        local_icon[0] ? local_icon : NULL,
+        "assets/goosy.png",
+        "assets/goot.png",
+        "/usr/share/pixmaps/goosy.png",
+        "/usr/local/share/pixmaps/goosy.png",
         NULL
     };
 
@@ -478,6 +488,19 @@ void goot_render_images(int32_t pad_px, int32_t title_h, int32_t view_top_abs_ro
 }
 
 void goot_render_end(bool request_frame_cb) {
+    const char *cap_path = getenv("GOOSY_CAPTURE_PATH");
+    if (cap_path && g_cur_buf && g_cur_buf->pixels) {
+        FILE *f = fopen(cap_path, "wb");
+        if (f) {
+            fwrite(g_cur_buf->pixels, 1, (size_t)g_cur_buf->stride * (size_t)g_cur_buf->height, f);
+            fclose(f);
+            FILE *df = fopen("/tmp/goosy_cap_dims.txt", "w");
+            if (df) {
+                fprintf(df, "%d %d\n", (int)g_cur_buf->width, (int)g_cur_buf->height);
+                fclose(df);
+            }
+        }
+    }
     if (g_cur_img) {
         pixman_image_unref(g_cur_img);
         g_cur_img = NULL;
