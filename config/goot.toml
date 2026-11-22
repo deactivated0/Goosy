@@ -1,0 +1,50 @@
+# Goot Terminal Configuration (~/.config/goot/goot.toml)
+# Minimal, Foot/Kitty-inspired defaults
+
+[font]
+family = "monospace"
+size = 11
+line_spacing = 0
+
+[window]
+padding = 8
+initial_cols = 100
+initial_rows = 30
+title = "Goot"
+
+[colors]
+background = "#080808"
+foreground = "#EAEAEA"
+cursor = "#EAEAEA"
+selection_bg = "#2A3F5F"
+selection_fg = "#FFFFFF"
+
+# Standard 16-color ANSI palette
+color0  = "#181818"
+color1  = "#D75F5F"
+color2  = "#87AF87"
+color3  = "#D7AF87"
+color4  = "#5F87AF"
+color5  = "#AF87AF"
+color6  = "#5FAFAf"
+color7  = "#D0D0D0"
+color8  = "#585858"
+color9  = "#FF5F5F"
+color10 = "#AFDF87"
+color11 = "#FFD787"
+color12 = "#87AFFF"
+color13 = "#D7AFFF"
+color14 = "#87DFDF"
+color15 = "#FFFFFF"
+
+[cursor]
+# block, underline, or beam
+style = "block"
+
+[scrollback]
+# Bounded scrollback line count (0..100000)
+lines = 4000
+
+[security]
+# OSC 52 clipboard write is disabled by default for security
+allow_osc52 = false
