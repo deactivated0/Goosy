@@ -185,10 +185,22 @@ fn translate_key(out: u8[>..]&, keysym: i32, mods: i32, utf8_bytes: const u8[:],
 fn format_paste(out: u8[>..]&, raw: const u8[:], bracketed: bool) {
     out.clear();
     if bracketed { out.append("\x1b[200~"); }
+    var prev_cr = false;
     for i in 0..raw.len {
         let b = raw[i];
         if b == 0x00 || b == 0x1B { continue; }
-        if b == '\n' { out.push('\r'); } else { out.push(b); }
+        if b == '\r' {
+            out.push('\r');
+            prev_cr = true;
+        } else if b == '\n' {
+            if !prev_cr {
+                out.push('\r');
+            }
+            prev_cr = false;
+        } else {
+            out.push(b);
+            prev_cr = false;
+        }
     }
     if bracketed { out.append("\x1b[201~"); }
 }

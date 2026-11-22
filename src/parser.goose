@@ -216,7 +216,9 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
             let enable = (final_b == 'h');
             for i in 0..p.param_count { apply_dec_private_mode(s, p.params[i], enable); }
         } else if final_b == 'u' {
-            s.reply_buf.append("\x1b[?0u");
+            s.reply_buf.append("\x1b[?");
+            push_reply_int(s.reply_buf, s.kitty_keyboard_flags);
+            s.reply_buf.push('u');
         } else if p.intermediate == '$' && final_b == 'p' {
             if p.param_count > 0 {
                 s.reply_buf.append("\x1b[?");
@@ -230,8 +232,27 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
     if p.private_prefix == '>' {
         if final_b == 'c' {
             s.reply_buf.append("\x1b[>0;10;0c");
+            return;
+        }
+        if final_b == 'u' {
+            s.kitty_keyboard_flags = param_or(p, 0, 0);
+            return;
         }
         return;
+    }
+
+    if p.private_prefix == '=' {
+        if final_b == 'u' {
+            s.kitty_keyboard_flags = param_or(p, 0, 0);
+            return;
+        }
+    }
+
+    if p.private_prefix == '<' {
+        if final_b == 'u' {
+            s.kitty_keyboard_flags = param_or(p, 0, 0);
+            return;
+        }
     }
 
     if p.private_prefix != 0 {

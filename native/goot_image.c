@@ -14,6 +14,9 @@
 #include <unistd.h>
 
 #define MAX_ACTIVE_IMAGES 128
+#define MAX_IMAGE_W       4096
+#define MAX_IMAGE_H       4096
+#define MAX_IMAGE_PIXELS  (16 * 1024 * 1024)
 
 typedef struct {
     uint32_t        id;
@@ -100,6 +103,7 @@ static int32_t add_image(int32_t col, int32_t abs_row, int32_t w, int32_t h, uin
 void goot_image_render(pixman_image_t *dest, int32_t pad_px, int32_t title_h,
                       int32_t view_top_abs_row, int32_t rows, int32_t cols,
                       int32_t cell_w, int32_t cell_h) {
+    (void)cols;
     if (!dest || g_image_count == 0) return;
     int32_t view_bot_abs_row = view_top_abs_row + rows;
 
@@ -123,6 +127,7 @@ void goot_image_render(pixman_image_t *dest, int32_t pad_px, int32_t title_h,
  * Sixel Graphics Decoder
  * ------------------------------------------------------------------------- */
 int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h) {
+    (void)cell_w;
     if (!data.data || data.len < 2) return 0;
 
     uint32_t pal[256];
@@ -184,6 +189,7 @@ int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row,
             int32_t count = 0;
             while (i < data.len && (data.data[i] >= '0' && data.data[i] <= '9')) {
                 count = count * 10 + (data.data[i] - '0');
+                if (count > MAX_IMAGE_W) count = MAX_IMAGE_W;
                 i++;
             }
             if (i < data.len && count > 0) {
@@ -192,7 +198,9 @@ int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row,
                     uint8_t bits = rep_ch - '?';
                     for (int r = 0; r < count; r++) {
                         if (cur_x >= cap_w) {
+                            if (cap_w >= MAX_IMAGE_W) break;
                             int32_t n_w = cap_w * 2;
+                            if (n_w > MAX_IMAGE_W) n_w = MAX_IMAGE_W;
                             uint32_t *np = (uint32_t *)calloc((size_t)n_w * (size_t)cap_h, sizeof(uint32_t));
                             if (!np) break;
                             for (int y = 0; y < cap_h; y++) {
@@ -222,7 +230,9 @@ int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row,
             cur_x = 0;
             cur_y += 6;
             if (cur_y + 6 > cap_h) {
+                if (cap_h >= MAX_IMAGE_H) break;
                 int32_t n_h = cap_h * 2;
+                if (n_h > MAX_IMAGE_H) n_h = MAX_IMAGE_H;
                 uint32_t *np = (uint32_t *)calloc((size_t)cap_w * (size_t)n_h, sizeof(uint32_t));
                 if (np) {
                     memcpy(np, pixels, (size_t)cap_w * (size_t)cap_h * sizeof(uint32_t));
@@ -234,7 +244,9 @@ int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row,
         } else if (c >= '?' && c <= '~') {
             /* 6-pixel slice */
             if (cur_x >= cap_w) {
+                if (cap_w >= MAX_IMAGE_W) break;
                 int32_t n_w = cap_w * 2;
+                if (n_w > MAX_IMAGE_W) n_w = MAX_IMAGE_W;
                 uint32_t *np = (uint32_t *)calloc((size_t)n_w * (size_t)cap_h, sizeof(uint32_t));
                 if (np) {
                     for (int y = 0; y < cap_h; y++) {
@@ -258,20 +270,22 @@ int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row,
         }
     }
 
-    if (max_x <= 0 || max_y <= 0) {
+    if (max_x <= 0 || max_y <= 0 || (uint64_t)max_x * (uint64_t)max_y > MAX_IMAGE_PIXELS) {
         free(pixels);
         return 0;
     }
 
     /* Compact to exact tight image */
     uint32_t *tight = (uint32_t *)malloc((size_t)max_x * (size_t)max_y * sizeof(uint32_t));
-    if (tight) {
-        for (int y = 0; y < max_y; y++) {
-            memcpy(tight + y * max_x, pixels + y * cap_w, (size_t)max_x * sizeof(uint32_t));
-        }
+    if (!tight) {
         free(pixels);
-        pixels = tight;
+        return 0;
     }
+    for (int y = 0; y < max_y; y++) {
+        memcpy(tight + y * max_x, pixels + y * cap_w, (size_t)max_x * sizeof(uint32_t));
+    }
+    free(pixels);
+    pixels = tight;
 
     return add_image(col, abs_row, max_x, max_y, pixels, cell_h);
 }
@@ -351,6 +365,12 @@ uint32_t *goot_decode_png_to_argb(const uint8_t *data, size_t len, int32_t *out_
     int bit_depth = 0, color_type = 0;
     png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, NULL, NULL, NULL);
 
+    if (width == 0 || height == 0 || width > MAX_IMAGE_W || height > MAX_IMAGE_H ||
+        (uint64_t)width * (uint64_t)height > MAX_IMAGE_PIXELS) {
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return NULL;
+    }
+
     if (bit_depth == 16) png_set_strip_16(png_ptr);
     if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png_ptr);
     if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png_ptr);
@@ -407,6 +427,7 @@ uint32_t *goot_decode_png_to_argb(const uint8_t *data, size_t len, int32_t *out_
 }
 
 int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h) {
+    (void)cell_w;
     if (!data.data || data.len < 2) return 0;
 
     int32_t format = 32; /* 32 = RGBA, 24 = RGB, 100 = PNG */
@@ -445,14 +466,20 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
     if (action == 'q') {
         char rep[64];
         int rlen = snprintf(rep, sizeof(rep), "\x1b_Gi=%d;OK\x1b\\", (int)image_id);
-        if (rlen > 0 && goot_pty_fd() >= 0) {
-            (void)write(goot_pty_fd(), rep, (size_t)rlen);
+        if (rlen > 0) {
+            goot_const_bytes_t resp = { (const uint8_t *)rep, rlen };
+            goot_pty_write(resp);
         }
         return 0;
     }
 
     if (action == 'd') {
         goot_image_clear();
+        return 0;
+    }
+
+    if (width > MAX_IMAGE_W || height > MAX_IMAGE_H ||
+        (width > 0 && height > 0 && (uint64_t)width * (uint64_t)height > MAX_IMAGE_PIXELS)) {
         return 0;
     }
 

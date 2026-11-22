@@ -78,6 +78,7 @@ root struct Screen {
     origin_mode: bool = false,
     mouse_mode: i32 = 0,
     mouse_sgr: bool = false,
+    kitty_keyboard_flags: i32 = 0,
 
     full_redraw_frames: i32 = 2,
     title_dirty: bool = false,
@@ -621,10 +622,30 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
         s.rows = nr;
         s.scroll_top = 0; s.scroll_bottom = nr - 1;
         clamp_cursor(s);
-        s.dirty_rows.clear();
+
+        var next_prompts: u8[>..] = [];
+        var next_wrapped: u8[>..] = [];
+        for r in 0..nr {
+            if r < s.prompt_rows.len {
+                next_prompts.push(s.prompt_rows[r]);
+            } else {
+                next_prompts.push(0);
+            }
+            if r < s.wrapped_rows.len {
+                next_wrapped.push(s.wrapped_rows[r]);
+            } else {
+                next_wrapped.push(0);
+            }
+        }
         s.prompt_rows.clear();
         s.wrapped_rows.clear();
-        for _ in 0..nr { s.dirty_rows.push(2); s.prompt_rows.push(0); s.wrapped_rows.push(0); }
+        for r in 0..nr {
+            s.prompt_rows.push(next_prompts[r]);
+            s.wrapped_rows.push(next_wrapped[r]);
+        }
+
+        s.dirty_rows.clear();
+        for _ in 0..nr { s.dirty_rows.push(2); }
         reset_tabs(s);
         s.sel_active = false;
         s.full_redraw_frames = 2;

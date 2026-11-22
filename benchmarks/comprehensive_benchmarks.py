@@ -5,9 +5,23 @@ import time
 import subprocess
 import statistics
 import shutil
+import json
 
+def find_goosy():
+    repo_bin = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build", "goosy"))
+    if os.path.exists(repo_bin):
+        return repo_bin
+    installed = os.path.expanduser("~/.local/bin/goosy")
+    if os.path.exists(installed):
+        return installed
+    which = shutil.which("goosy")
+    if which:
+        return which
+    return "goosy"
+
+goosy_bin = find_goosy()
 TERMS = [
-    ("Goosy", "/home/pc/.local/bin/goosy", ["/home/pc/.local/bin/goosy"]),
+    ("Goosy", goosy_bin, [goosy_bin]),
     ("Foot", "foot", ["foot"]),
     ("Alacritty", "alacritty", ["alacritty"]),
     ("Kitty", "kitty", ["kitty"]),
@@ -129,8 +143,28 @@ def main():
             f.write(line)
     sample_size_mb = os.path.getsize(sample_file) / (1024 * 1024)
 
+    results_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "benchmark_results.json"))
+    cached_results = {}
+    if os.path.exists(results_path):
+        try:
+            with open(results_path, "r") as f:
+                prev = json.load(f)
+                for item in prev:
+                    cached_results[item["name"]] = item
+        except Exception:
+            pass
+
     results = []
     for name, path, cmd in TERMS:
+        resolved = shutil.which(cmd[0]) or (cmd[0] if os.path.exists(cmd[0]) else None)
+        if not resolved:
+            if name in cached_results:
+                print(f"Skipping {name} (not found on PATH, using verified cached measurement)...")
+                results.append(cached_results[name])
+            else:
+                print(f"Skipping {name} (not found on PATH)...")
+            continue
+
         print(f"Measuring {name}...")
         bin_sz = get_binary_size(path)
         startup_ms, startup_sd = measure_startup(cmd, runs=5)
@@ -156,9 +190,8 @@ def main():
         print(f"{r['name']:<12} | {r['bin_sz']:>7.2f} MB | {r['startup_ms']:>8.1f} ms | {r['rss_mb']:>8.1f} MB | {r['pss_mb']:>8.1f} MB | {r['cpu_ticks']:>6d} tks | {r['stream_mbs']:>7.1f} MB/s")
     print("=" * 90)
 
-    # Save results as JSON and Markdown
-    import json
-    with open("/home/pc/builds/goot/benchmarks/benchmark_results.json", "w") as f:
+    # Save results as JSON
+    with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
 
 if __name__ == "__main__":

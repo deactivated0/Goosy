@@ -386,18 +386,55 @@ int64_t goot_pty_read(goot_bytes_t buf) {
     return -1;
 }
 
-#define PTY_WRITE_BUF_CAP (64 * 1024)
-static uint8_t g_write_buf[PTY_WRITE_BUF_CAP];
-static size_t  g_write_head = 0;
-static size_t  g_write_tail = 0;
+#define PTY_INITIAL_CAP (64 * 1024)
+#define PTY_MAX_CAP     (16 * 1024 * 1024)
+
+static uint8_t *g_write_buf  = NULL;
+static size_t   g_write_cap  = 0;
+static size_t   g_write_head = 0;
+static size_t   g_write_tail = 0;
 
 static size_t pty_write_buf_len(void) {
+    if (!g_write_buf || g_write_cap == 0) return 0;
     if (g_write_tail >= g_write_head) return g_write_tail - g_write_head;
-    return PTY_WRITE_BUF_CAP - g_write_head + g_write_tail;
+    return g_write_cap - g_write_head + g_write_tail;
 }
 
 static size_t pty_write_buf_free(void) {
-    return PTY_WRITE_BUF_CAP - 1 - pty_write_buf_len();
+    if (!g_write_buf || g_write_cap == 0) return 0;
+    return g_write_cap - 1 - pty_write_buf_len();
+}
+
+static bool pty_write_buf_grow(size_t needed) {
+    if (needed > PTY_MAX_CAP) needed = PTY_MAX_CAP;
+    size_t new_cap = g_write_cap ? g_write_cap : PTY_INITIAL_CAP;
+    while (new_cap < needed) {
+        new_cap *= 2;
+        if (new_cap > PTY_MAX_CAP) { new_cap = PTY_MAX_CAP; break; }
+    }
+    if (new_cap <= g_write_cap) return false;
+
+    uint8_t *new_buf = (uint8_t *)malloc(new_cap);
+    if (!new_buf) return false;
+
+    size_t len = 0;
+    if (g_write_buf) {
+        if (g_write_tail >= g_write_head) {
+            len = g_write_tail - g_write_head;
+            if (len > 0) memcpy(new_buf, g_write_buf + g_write_head, len);
+        } else {
+            size_t part1 = g_write_cap - g_write_head;
+            memcpy(new_buf, g_write_buf + g_write_head, part1);
+            memcpy(new_buf + part1, g_write_buf, g_write_tail);
+            len = part1 + g_write_tail;
+        }
+        free(g_write_buf);
+    }
+    g_write_buf = new_buf;
+    g_write_cap = new_cap;
+    g_write_head = 0;
+    g_write_tail = len;
+    return true;
 }
 
 int32_t goot_pty_has_pending_write(void) {
@@ -405,12 +442,12 @@ int32_t goot_pty_has_pending_write(void) {
 }
 
 int64_t goot_pty_flush(void) {
-    if (g_master_fd < 0) return -1;
+    if (g_master_fd < 0 || !g_write_buf || g_write_cap == 0) return -1;
     while (g_write_head != g_write_tail) {
-        size_t chunk = (g_write_tail > g_write_head) ? (g_write_tail - g_write_head) : (PTY_WRITE_BUF_CAP - g_write_head);
+        size_t chunk = (g_write_tail > g_write_head) ? (g_write_tail - g_write_head) : (g_write_cap - g_write_head);
         ssize_t n = write(g_master_fd, g_write_buf + g_write_head, chunk);
         if (n > 0) {
-            g_write_head = (g_write_head + (size_t)n) % PTY_WRITE_BUF_CAP;
+            g_write_head = (g_write_head + (size_t)n) % g_write_cap;
         } else if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
                 break;
@@ -427,6 +464,12 @@ int64_t goot_pty_write(goot_const_bytes_t data) {
     if (g_master_fd < 0 || !data.data || data.len <= 0) {
         return 0;
     }
+    if (!g_write_buf) {
+        g_write_buf = (uint8_t *)malloc(PTY_INITIAL_CAP);
+        g_write_cap = g_write_buf ? PTY_INITIAL_CAP : 0;
+        g_write_head = 0;
+        g_write_tail = 0;
+    }
     if (g_write_head != g_write_tail) {
         goot_pty_flush();
     }
@@ -441,13 +484,17 @@ int64_t goot_pty_write(goot_const_bytes_t data) {
     }
     if (written < (size_t)data.len) {
         size_t rem = (size_t)data.len - written;
+        if (rem > pty_write_buf_free()) {
+            size_t needed = pty_write_buf_len() + rem + 1;
+            pty_write_buf_grow(needed);
+        }
         size_t avail = pty_write_buf_free();
         size_t to_queue = rem < avail ? rem : avail;
-        if (to_queue > 0) {
-            size_t first = PTY_WRITE_BUF_CAP - g_write_tail;
+        if (to_queue > 0 && g_write_buf) {
+            size_t first = g_write_cap - g_write_tail;
             if (to_queue <= first) {
                 memcpy(g_write_buf + g_write_tail, data.data + written, to_queue);
-                g_write_tail = (g_write_tail + to_queue) % PTY_WRITE_BUF_CAP;
+                g_write_tail = (g_write_tail + to_queue) % g_write_cap;
             } else {
                 memcpy(g_write_buf + g_write_tail, data.data + written, first);
                 memcpy(g_write_buf, data.data + written + first, to_queue - first);
@@ -512,6 +559,14 @@ int32_t goot_pty_exit_code(void) {
 }
 
 void goot_pty_close(void) {
+    if (g_write_buf) {
+        free(g_write_buf);
+        g_write_buf = NULL;
+    }
+    g_write_cap = 0;
+    g_write_head = 0;
+    g_write_tail = 0;
+
     if (g_master_fd >= 0) {
         close(g_master_fd);
         g_master_fd = -1;

@@ -294,6 +294,51 @@ fn test_agy_escape_sequences_and_state() {
     assert(c_comp.bg == 0xF6912E);
 }
 
+fn test_crlf_paste_and_resize_preservation() {
+    var out: u8[>..] = [];
+    input::format_paste(out, "hello\r\nworld\nfoo\rbar", false);
+    // Should be "hello\rworld\rfoo\rbar" with no double \r\r (len = 19)
+    assert(out.len == 19);
+    assert(out[5] == '\r' && out[6] == 'w');
+    assert(out[11] == '\r' && out[12] == 'f');
+    assert(out[15] == '\r' && out[16] == 'b');
+
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 40, 4, pal.fg, pal.bg, 10, 0);
+    scr.cy = 1;
+    screen::mark_prompt_row(scr);
+    assert(scr.prompt_rows[1] == 1);
+
+    // Height-only resize: row 1 prompt mark must be preserved
+    screen::resize(scr, 40, 8);
+    assert(scr.prompt_rows.len == 8);
+    assert(scr.prompt_rows[1] == 1);
+}
+
+fn test_kitty_keyboard_protocol() {
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 40, 4, pal.fg, pal.bg, 10, 0);
+    var par = parser::Parser { .. };
+
+    // Query flags: initial 0
+    scr.reply_buf.clear();
+    parser::feed_slice(par, scr, pal, "\x1b[?u");
+    assert(scr.reply_buf.len == 5); // "\x1b[?0u"
+    assert(scr.reply_buf[0] == 0x1B && scr.reply_buf[1] == '[' && scr.reply_buf[2] == '?' && scr.reply_buf[3] == '0' && scr.reply_buf[4] == 'u');
+
+    // Set flags to 3
+    parser::feed_slice(par, scr, pal, "\x1b[=3u");
+    assert(scr.kitty_keyboard_flags == 3);
+
+    // Query flags again: now 3
+    scr.reply_buf.clear();
+    parser::feed_slice(par, scr, pal, "\x1b[?u");
+    assert(scr.reply_buf.len == 5);
+    assert(scr.reply_buf[3] == '3');
+}
+
 fn main() {
     test_utf8_decoding();
     test_osc7_and_osc133_prompt_jumps();
@@ -303,5 +348,7 @@ fn main() {
     test_fastfetch_alignment_and_box_drawing();
     test_underlines_hyperlinks_and_reflow();
     test_agy_escape_sequences_and_state();
+    test_crlf_paste_and_resize_preservation();
+    test_kitty_keyboard_protocol();
     print("goot: all Goose unit tests passed");
 }
