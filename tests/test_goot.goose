@@ -35,7 +35,7 @@ fn test_osc7_and_osc133_prompt_jumps() {
     var pal = colors::default_palette();
     var scr = screen::Screen { .. };
     screen::init(scr, 40, 4, pal.fg, pal.bg, 20, 0);
-    var par = parser::new_parser(false);
+    var par = parser::Parser { .. };
 
     // OSC 7 CWD with percent-encoding
     parser::feed_slice(par, scr, pal, "\x1b]7;file://artix/home/user/my%20dir\x07");
@@ -52,7 +52,7 @@ fn test_search_url_and_unicode_modes() {
     var pal = colors::default_palette();
     var scr = screen::Screen { .. };
     screen::init(scr, 50, 5, pal.fg, pal.bg, 20, 0);
-    var par = parser::new_parser(false);
+    var par = parser::Parser { .. };
     var ms  = modes::new_state();
 
     parser::feed_slice(par, scr, pal, "visit https://aardappel.github.io/goose/ now\r\nhello world foo_bar");
@@ -84,7 +84,7 @@ fn test_mouse_selection_modes() {
     var pal = colors::default_palette();
     var scr = screen::Screen { .. };
     screen::init(scr, 40, 4, pal.fg, pal.bg, 10, 0);
-    var par = parser::new_parser(false);
+    var par = parser::Parser { .. };
     parser::feed_slice(par, scr, pal, "say \"hello world\" today\r\n123456");
 
     // Double-click word selection
@@ -141,7 +141,7 @@ fn test_fastfetch_alignment_and_box_drawing() {
     var pal = colors::default_palette();
     var scr = screen::Screen { .. };
     screen::init(scr, 120, 30, pal.fg, pal.bg, 100, 0);
-    var par = parser::new_parser(false);
+    var par = parser::Parser { .. };
 
     // Fastfetch line with Artix logo on left (col 0..43) and sysinfo on right (col 44..),
     // testing ITU colon truecolor syntax, bold SGR, and box-drawing horizontal lines (U+2500).
@@ -168,6 +168,42 @@ fn test_fastfetch_alignment_and_box_drawing() {
     assert(c_r2.cp == 0 || c_r2.cp == 0x20);
 }
 
+fn test_underlines_hyperlinks_and_reflow() {
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 30, 4, pal.fg, pal.bg, 20, 0);
+    var par = parser::Parser { .. };
+
+    // Test Underline styles: curly (4:3), double (4:2), dotted (4:4), dashed (4:5)
+    // and custom underline truecolor (58;2;255;0;128)
+    parser::feed_slice(par, scr, pal, "\x1b[4:3m\x1b[58;2;255;0;128mCurly\x1b[59m\x1b[24m\r\n");
+    let c0 = screen::visible_cell(scr, 0, 0);
+    assert(c0.ul_style == screen::UL_CURLY);
+    assert(c0.ul_color == 0xFF0080);
+
+    // Test OSC 8 hyperlinks
+    parser::feed_slice(par, scr, pal, "\x1b]8;;https://artixlinux.org\x1b\\Link\x1b]8;;\x1b\\\r\n");
+    let c_link = screen::visible_cell(scr, 0, 1);
+    assert(c_link.link_id > 0);
+    var link_out: u8[>..] = [];
+    assert(screen::get_hyperlink(scr, c_link.link_id, link_out));
+    assert(link_out.len == 22);
+
+    // Test Scrollback Reflow: narrow to wide and wide to narrow
+    var reflow_scr = screen::Screen { .. };
+    screen::init(reflow_scr, 10, 4, pal.fg, pal.bg, 20, 0);
+    var reflow_par = parser::Parser { .. };
+    // "1234567890abcdef" on 10-col screen soft-wraps "abcdef" to row 1
+    parser::feed_slice(reflow_par, reflow_scr, pal, "1234567890abcdef\r\n");
+    assert(screen::visible_cell(reflow_scr, 0, 1).cp == 'a' as u32);
+    assert(reflow_scr.wrapped_rows[0] == 1);
+
+    // Now resize wider to 20 cols: logical line should unwrap and fit on row 0
+    screen::resize(reflow_scr, 20, 4);
+    assert(screen::visible_cell(reflow_scr, 10, 0).cp == 'a' as u32);
+    assert(reflow_scr.wrapped_rows[0] == 0);
+}
+
 fn main() {
     test_utf8_decoding();
     test_osc7_and_osc133_prompt_jumps();
@@ -175,5 +211,6 @@ fn main() {
     test_mouse_selection_modes();
     test_shortcuts_and_goot_ini();
     test_fastfetch_alignment_and_box_drawing();
+    test_underlines_hyperlinks_and_reflow();
     print("goot: all Goose unit tests passed");
 }

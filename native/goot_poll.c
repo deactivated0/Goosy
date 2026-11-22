@@ -13,23 +13,46 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
+#include <sys/timerfd.h>
 #include <time.h>
 #include <unistd.h>
 
 enum {
     TAG_WAYLAND = 1,
     TAG_PTY     = 2,
-    TAG_SIGNAL  = 3
+    TAG_SIGNAL  = 3,
+    TAG_TIMER   = 4
 };
 
-static int g_epfd   = -1;
-static int g_sigfd  = -1;
-static int g_pty_fd = -1;
+static int g_epfd     = -1;
+static int g_sigfd    = -1;
+static int g_pty_fd   = -1;
+static int g_timer_fd = -1;
 static uint32_t g_pty_events = EPOLLIN;
 static volatile int g_terminated = 0;
 
 int32_t goot_poll_terminated(void) {
     return g_terminated;
+}
+
+void goot_poll_arm_repeat(int32_t delay_ms, int32_t interval_ms) {
+    if (g_timer_fd < 0) return;
+    struct itimerspec its;
+    memset(&its, 0, sizeof(its));
+    if (delay_ms > 0 && interval_ms > 0) {
+        its.it_value.tv_sec     = delay_ms / 1000;
+        its.it_value.tv_nsec    = (delay_ms % 1000) * 1000000L;
+        its.it_interval.tv_sec  = interval_ms / 1000;
+        its.it_interval.tv_nsec = (interval_ms % 1000) * 1000000L;
+    }
+    timerfd_settime(g_timer_fd, 0, &its, NULL);
+}
+
+void goot_poll_disarm_repeat(void) {
+    if (g_timer_fd < 0) return;
+    struct itimerspec its;
+    memset(&its, 0, sizeof(its));
+    timerfd_settime(g_timer_fd, 0, &its, NULL);
 }
 
 int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
@@ -84,6 +107,16 @@ int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
         if (epoll_ctl(g_epfd, EPOLL_CTL_ADD, pty_fd, &ev) < 0) {
             goot_poll_close();
             return -1;
+        }
+    }
+
+    g_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (g_timer_fd >= 0) {
+        ev.events = EPOLLIN;
+        ev.data.u32 = TAG_TIMER;
+        if (epoll_ctl(g_epfd, EPOLL_CTL_ADD, g_timer_fd, &ev) < 0) {
+            close(g_timer_fd);
+            g_timer_fd = -1;
         }
     }
 
@@ -144,12 +177,22 @@ int32_t goot_poll_wait(int32_t timeout_ms) {
                 }
                 mask |= GOOT_POLL_SIGNAL;
             }
+        } else if (tag == TAG_TIMER) {
+            uint64_t exp = 0;
+            while (read(g_timer_fd, &exp, sizeof(exp)) == (ssize_t)sizeof(exp)) {
+                (void)exp;
+            }
+            mask |= GOOT_POLL_TIMER;
         }
     }
     return mask;
 }
 
 void goot_poll_close(void) {
+    if (g_timer_fd >= 0) {
+        close(g_timer_fd);
+        g_timer_fd = -1;
+    }
     if (g_sigfd >= 0) {
         close(g_sigfd);
         g_sigfd = -1;

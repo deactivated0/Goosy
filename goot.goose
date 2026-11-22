@@ -49,6 +49,43 @@ fn hit_test_title_bar(px: i32, py: i32, win_w: i32, title_h: i32, scale: i32) ->
     return renderer::BTN_NONE;
 }
 
+let RESIZE_NONE: i32         = 0;
+let RESIZE_TOP: i32          = 1;
+let RESIZE_BOTTOM: i32       = 2;
+let RESIZE_LEFT: i32         = 4;
+let RESIZE_TOP_LEFT: i32     = 5;
+let RESIZE_BOTTOM_LEFT: i32  = 6;
+let RESIZE_RIGHT: i32        = 8;
+let RESIZE_TOP_RIGHT: i32    = 9;
+let RESIZE_BOTTOM_RIGHT: i32 = 10;
+
+fn hit_test_resize(px: i32, py: i32, w: i32, h: i32, margin: i32) -> i32 {
+    let top = (py < margin);
+    let bot = (py >= h - margin);
+    let left = (px < margin);
+    let right = (px >= w - margin);
+
+    if top && left { return RESIZE_TOP_LEFT; }
+    if top && right { return RESIZE_TOP_RIGHT; }
+    if bot && left { return RESIZE_BOTTOM_LEFT; }
+    if bot && right { return RESIZE_BOTTOM_RIGHT; }
+    if top { return RESIZE_TOP; }
+    if bot { return RESIZE_BOTTOM; }
+    if left { return RESIZE_LEFT; }
+    if right { return RESIZE_RIGHT; }
+    return RESIZE_NONE;
+}
+
+fn cursor_for_resize_edge(edge: i32) -> i32 {
+    match edge {
+        RESIZE_TOP, RESIZE_BOTTOM => 3, // ns-resize
+        RESIZE_LEFT, RESIZE_RIGHT => 4, // ew-resize
+        RESIZE_TOP_LEFT, RESIZE_BOTTOM_RIGHT => 5, // nwse-resize
+        RESIZE_BOTTOM_LEFT, RESIZE_TOP_RIGHT => 6, // nesw-resize
+        _ => 1,
+    }
+}
+
 fn adjust_font(scr: screen::Screen&, cfg: config::Config&, font_size: i32&, base_size: i32, delta: i32) {
     if delta == 0 {
         font_size = base_size;
@@ -99,7 +136,7 @@ fn main() {
     screen::init(scr, cfg.initial_cols, cfg.initial_rows,
                  cfg.palette.fg, cfg.palette.bg,
                  cfg.scrollback_lines, cfg.cursor_style);
-    var par = parser::new_parser(cfg.allow_osc52);
+    var par = parser::Parser { allow_osc52: cfg.allow_osc52, .. };
     var mstate = modes::new_state();
 
     guard ffi::pty_spawn("", "xterm-256color", scr.cols, scr.rows, cfg.initial_cols * init_cw, cfg.initial_rows * init_ch) == 0 else {
@@ -159,6 +196,9 @@ fn main() {
 
         if (ready & ffi::POLL_WAYLAND) != 0 {
             if ffi::wl_prepare_and_read() < 0 { break; }
+        }
+        if (ready & ffi::POLL_TIMER) != 0 {
+            ffi::wl_handle_timer_repeat();
         }
 
         loop {
@@ -310,6 +350,10 @@ fn main() {
                 let is_csd = cfg.title_bar && (ffi::wl_is_csd() != 0);
                 let title_h = if is_csd { cfg.title_bar_height * sc } else { 0 };
                 let win_w = ffi::wl_width() * sc;
+                let win_logical_w = ffi::wl_width();
+                let win_logical_h = ffi::wl_height();
+                let is_resizable = (ffi::wl_is_maximized() == 0) && (ffi::wl_is_fullscreen() == 0);
+                let resize_edge = if is_resizable { hit_test_resize(ptr_x, ptr_y, win_logical_w, win_logical_h, 7) } else { RESIZE_NONE };
 
                 if drag_left {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
@@ -320,6 +364,12 @@ fn main() {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
                                           ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
                     screen::extend_selection(scr, c, r, right_force_c);
+                } else if resize_edge != RESIZE_NONE {
+                    if hover_btn != renderer::BTN_NONE {
+                        hover_btn = renderer::BTN_NONE;
+                        scr.title_dirty = true;
+                    }
+                    ffi::wl_set_cursor_shape(cursor_for_resize_edge(resize_edge));
                 } else if title_h > 0 && ptr_y * sc < title_h {
                     let next_hover = hit_test_title_bar(ptr_x, ptr_y, win_w, title_h, sc);
                     if hover_btn != next_hover {
@@ -336,7 +386,14 @@ fn main() {
                         hover_btn = renderer::BTN_NONE;
                         scr.title_dirty = true;
                     }
-                    ffi::wl_set_cursor_shape(0); // text
+                    let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
+                                          ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
+                    let cell = screen::visible_cell(scr, c, r);
+                    if cell.link_id > 0 {
+                        ffi::wl_set_cursor_shape(2); // pointer for hyperlinks
+                    } else {
+                        ffi::wl_set_cursor_shape(0); // text
+                    }
                 }
             } else if ev == ffi::EV_POINTER_BUTTON {
                 let btn     = ffi::wl_ev_a();
@@ -347,8 +404,14 @@ fn main() {
                 let sc      = ffi::wl_scale();
                 let is_csd  = cfg.title_bar && (ffi::wl_is_csd() != 0);
                 let title_h = if is_csd { cfg.title_bar_height * sc } else { 0 };
+                let win_logical_w = ffi::wl_width();
+                let win_logical_h = ffi::wl_height();
+                let is_resizable = (ffi::wl_is_maximized() == 0) && (ffi::wl_is_fullscreen() == 0);
+                let resize_edge = if is_resizable { hit_test_resize(ptr_x, ptr_y, win_logical_w, win_logical_h, 7) } else { RESIZE_NONE };
 
-                if title_h > 0 && ptr_y * sc < title_h && !drag_left && !drag_right {
+                if resize_edge != RESIZE_NONE && btn == 272 && pressed && !drag_left && !drag_right {
+                    ffi::wl_toplevel_resize(resize_edge);
+                } else if title_h > 0 && ptr_y * sc < title_h && !drag_left && !drag_right {
                     if btn == 272 { // Left click
                         if pressed {
                             pressed_btn = hover_btn;
@@ -388,28 +451,36 @@ fn main() {
                         if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
                     } else if btn == 272 { // Left click
                         if pressed {
-                            let now = ffi::time_monotonic_ns();
-                            if now - last_click_ns < 400000000 && c == last_click_c && r == last_click_r {
-                                click_count += 1;
-                                if click_count > 4 { click_count = 1; }
+                            let cell = screen::visible_cell(scr, c, r);
+                            if ctrl && cell.link_id > 0 {
+                                var link_url: u8[>..] = [];
+                                if screen::get_hyperlink(scr, cell.link_id, link_url) && link_url.len > 0 {
+                                    let _ = ffi::open_url(link_url);
+                                }
                             } else {
-                                click_count = 1;
-                            }
-                            last_click_ns = now; last_click_c = c; last_click_r = r;
+                                let now = ffi::time_monotonic_ns();
+                                if now - last_click_ns < 400000000 && c == last_click_c && r == last_click_r {
+                                    click_count += 1;
+                                    if click_count > 4 { click_count = 1; }
+                                } else {
+                                    click_count = 1;
+                                }
+                                last_click_ns = now; last_click_c = c; last_click_r = r;
 
-                            if click_count == 1 {
-                                drag_left = true;
-                                scr.sel_active = true;
-                                scr.sel_mode = if ctrl { screen::SEL_BLOCK } else { screen::SEL_CHAR };
-                                scr.sel_x0 = c; scr.sel_y0 = r;
-                                scr.sel_x1 = c; scr.sel_y1 = r;
-                                screen::mark_all_dirty(scr);
-                            } else if click_count == 2 {
-                                screen::select_word(scr, c, r, ctrl);
-                            } else if click_count == 3 {
-                                screen::select_quote_or_line(scr, c, r);
-                            } else if click_count == 4 {
-                                screen::select_line(scr, r);
+                                if click_count == 1 {
+                                    drag_left = true;
+                                    scr.sel_active = true;
+                                    scr.sel_mode = if ctrl { screen::SEL_BLOCK } else { screen::SEL_CHAR };
+                                    scr.sel_x0 = c; scr.sel_y0 = r;
+                                    scr.sel_x1 = c; scr.sel_y1 = r;
+                                    screen::mark_all_dirty(scr);
+                                } else if click_count == 2 {
+                                    screen::select_word(scr, c, r, ctrl);
+                                } else if click_count == 3 {
+                                    screen::select_quote_or_line(scr, c, r);
+                                } else if click_count == 4 {
+                                    screen::select_line(scr, r);
+                                }
                             }
                         } else {
                             drag_left = false;

@@ -32,6 +32,7 @@ let POLL_WAYLAND = 1;
 let POLL_PTY     = 2;
 let POLL_SIGNAL  = 4;
 let POLL_PTY_HUP = 8;
+let POLL_TIMER   = 16;
 
 // POSIX PTY & safe process helpers
 extern fn pty_spawn(shell_override: const u8[:], term_env: const u8[:],
@@ -52,6 +53,8 @@ extern fn open_url(url: const u8[:]) -> i32 = "goot_open_url";
 extern fn poll_init(wl_fd: i32, pty_fd: i32) -> i32 = "goot_poll_init";
 extern fn poll_wait(timeout_ms: i32) -> i32 = "goot_poll_wait";
 extern fn poll_terminated() -> i32 = "goot_poll_terminated";
+extern fn poll_arm_repeat(delay_ms: i32, interval_ms: i32) = "goot_poll_arm_repeat";
+extern fn poll_disarm_repeat() = "goot_poll_disarm_repeat";
 extern fn poll_close() = "goot_poll_close";
 extern fn time_monotonic_ns() -> i64 = "goot_time_monotonic_ns";
 
@@ -78,8 +81,10 @@ extern fn wl_is_activated() -> i32 = "goot_wl_is_activated";
 extern fn wl_is_csd() -> i32 = "goot_wl_is_csd";
 extern fn wl_set_decoration_mode(pref: i32) = "goot_wl_set_decoration_mode";
 extern fn wl_toplevel_move() = "goot_wl_toplevel_move";
+extern fn wl_toplevel_resize(edges: i32) = "goot_wl_toplevel_resize";
 extern fn wl_toplevel_minimize() = "goot_wl_toplevel_minimize";
 extern fn wl_toplevel_toggle_maximize() = "goot_wl_toplevel_toggle_maximize";
+extern fn wl_handle_timer_repeat() = "goot_wl_handle_timer_repeat";
 extern fn wl_set_cursor_shape(shape: i32) = "goot_wl_set_cursor_shape";
 extern fn wl_clipboard_set(text: const u8[:]) -> i32 = "goot_wl_clipboard_set";
 extern fn wl_clipboard_request() -> i32 = "goot_wl_clipboard_request";
@@ -95,18 +100,31 @@ extern fn font_resize(size_pt: i32, dpi: i32) -> i32 = "goot_font_resize";
 extern fn font_cell_width() -> i32 = "goot_font_cell_width";
 extern fn font_cell_height() -> i32 = "goot_font_cell_height";
 extern fn font_baseline() -> i32 = "goot_font_baseline";
+extern fn font_is_rtl(cp: u32) -> i32 = "goot_font_is_rtl";
 extern fn font_close() = "goot_font_close";
 
-// Pixman software renderer
+// Pixman software renderer & Graphics API
 extern fn render_begin(bg_rgb: u32) -> i32 = "goot_render_begin";
 extern fn render_fill_rect(x: i32, y: i32, w: i32, h: i32, rgb: u32) = "goot_render_fill_rect";
 extern fn render_cell(px: i32, py: i32, cell_w: i32, cell_h: i32,
                       codepoint: u32, fg_rgb: u32, bg_rgb: u32,
                       attr_flags: u32, span_cols: i32) = "goot_render_cell";
+extern fn render_cell_ext(px: i32, py: i32, cell_w: i32, cell_h: i32,
+                          codepoint: u32, fg_rgb: u32, bg_rgb: u32,
+                          attr_flags: u32, span_cols: i32,
+                          ul_style: u8, ul_color: u32) = "goot_render_cell_ext";
 extern fn render_cursor(px: i32, py: i32, cell_w: i32, cell_h: i32,
                         color_rgb: u32, style: i32) = "goot_render_cursor";
 extern fn render_damage(x: i32, y: i32, w: i32, h: i32) = "goot_render_damage";
+extern fn render_images(pad_px: i32, title_h: i32, view_top_abs_row: i32,
+                        rows: i32, cols: i32, cell_w: i32, cell_h: i32) = "goot_render_images";
 extern fn render_end(request_frame_cb: bool) = "goot_render_end";
+
+// Sixel & Kitty Graphics Protocols
+extern fn sixel_decode(data: const u8[:], col: i32, abs_row: i32, cell_w: i32, cell_h: i32) -> i32 = "goot_sixel_decode";
+extern fn kitty_graphics(data: const u8[:], col: i32, abs_row: i32, cell_w: i32, cell_h: i32) -> i32 = "goot_kitty_graphics";
+extern fn image_scroll(evicted_lines: i32) = "goot_image_scroll";
+extern fn image_clear() = "goot_image_clear";
 
 // Environment & Config File Helpers
 extern fn env_get(name: const u8[:], out_buf: u8[:]) -> i64 = "goot_env_get";

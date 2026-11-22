@@ -27,6 +27,8 @@
 #include "xdg-shell-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
+#include "fractional-scale-v1-client-protocol.h"
+#include "viewporter-client-protocol.h"
 
 #define GOOT_EV_QUEUE_CAP 256
 #define GOOT_CLIP_MAX     (256 * 1024)
@@ -69,6 +71,12 @@ static struct zwp_primary_selection_device_manager_v1 *g_prim_mgr   = NULL;
 static struct zwp_primary_selection_device_v1         *g_prim_dev   = NULL;
 static struct zwp_primary_selection_source_v1         *g_prim_src   = NULL;
 static struct zwp_primary_selection_offer_v1          *g_prim_offer = NULL;
+
+static struct wp_fractional_scale_manager_v1          *g_fract_mgr  = NULL;
+static struct wp_fractional_scale_v1                  *g_fract_scale= NULL;
+static struct wp_viewporter                           *g_viewporter = NULL;
+static struct wp_viewport                             *g_viewport   = NULL;
+static uint32_t                                        g_preferred_scale_120ths = 120;
 
 static struct wl_cursor_theme *g_cursor_theme   = NULL;
 static struct wl_surface      *g_cursor_surface = NULL;
@@ -198,6 +206,22 @@ static void frame_done(void *data, struct wl_callback *cb, uint32_t time_ms) {
     push_ev3(GOOT_EV_FRAME_DONE, 0, 0, 0);
 }
 
+static void fract_preferred_scale(void *data, struct wp_fractional_scale_v1 *fs, uint32_t scale_120ths) {
+    (void)data; (void)fs;
+    if (scale_120ths > 0) {
+        g_preferred_scale_120ths = scale_120ths;
+        int32_t sc = (scale_120ths + 59) / 120;
+        if (sc < 1) sc = 1;
+        if (sc != g_scale) {
+            g_scale = sc;
+            push_ev3(GOOT_EV_CONFIGURE, g_width, g_height, g_scale);
+        }
+    }
+}
+static const struct wp_fractional_scale_v1_listener g_fract_scale_listener = {
+    .preferred_scale = fract_preferred_scale,
+};
+
 static const struct wl_callback_listener g_frame_listener = { .done = frame_done };
 
 void goot_wl_commit_damage(struct goot_shm_buffer *buf,
@@ -205,6 +229,9 @@ void goot_wl_commit_damage(struct goot_shm_buffer *buf,
                            bool request_frame_cb) {
     if (!g_surface || !buf || !buf->wl_buffer) return;
     wl_surface_set_buffer_scale(g_surface, g_scale);
+    if (g_viewport && g_width > 0 && g_height > 0) {
+        wp_viewport_set_destination(g_viewport, g_width, g_height);
+    }
     wl_surface_attach(g_surface, (struct wl_buffer *)buf->wl_buffer, 0, 0);
     if (w > 0 && h > 0) wl_surface_damage_buffer(g_surface, x, y, w, h);
     if (request_frame_cb && !g_frame_cb) {
@@ -277,11 +304,26 @@ static void kb_leave(void *data, struct wl_keyboard *kb, uint32_t serial, struct
     (void)data; (void)kb; (void)serial; (void)sf;
     push_ev3(GOOT_EV_FOCUS, 0, 0, 0);
 }
+static int32_t  g_repeat_rate  = 25;
+static int32_t  g_repeat_delay = 400;
+static uint32_t g_repeat_key   = 0;
+
 static void kb_key(void *data, struct wl_keyboard *kb, uint32_t serial,
                    uint32_t time_ms, uint32_t key, uint32_t state) {
     (void)data; (void)kb; (void)time_ms;
     g_last_serial = serial;
     bool pressed = (state == WL_KEYBOARD_KEY_STATE_PRESSED);
+    if (pressed) {
+        g_repeat_key = key;
+        int32_t interval = (g_repeat_rate > 0) ? (1000 / g_repeat_rate) : 40;
+        if (interval < 5) interval = 5;
+        goot_poll_arm_repeat(g_repeat_delay, interval);
+    } else {
+        if (g_repeat_key == key) {
+            goot_poll_disarm_repeat();
+            g_repeat_key = 0;
+        }
+    }
     uint32_t sym = 0;
     int32_t mods = 0;
     goot_ev_t ev;
@@ -301,12 +343,30 @@ static void kb_modifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
     goot_xkb_update_mods(dep, lat, loc, grp);
 }
 static void kb_repeat_info(void *data, struct wl_keyboard *kb, int32_t rate, int32_t delay) {
-    (void)data; (void)kb; (void)rate; (void)delay;
+    (void)data; (void)kb;
+    if (rate > 0) g_repeat_rate = rate;
+    if (delay > 0) g_repeat_delay = delay;
 }
 static const struct wl_keyboard_listener g_kb_listener = {
     .keymap = kb_keymap, .enter = kb_enter, .leave = kb_leave,
     .key = kb_key, .modifiers = kb_modifiers, .repeat_info = kb_repeat_info,
 };
+
+void goot_wl_handle_timer_repeat(void) {
+    if (g_repeat_key == 0) return;
+    uint32_t sym = 0;
+    int32_t mods = 0;
+    goot_ev_t ev;
+    memset(&ev, 0, sizeof(ev));
+    if (goot_xkb_translate_key(g_repeat_key, true, &sym, &mods,
+                               ev.utf8, (int32_t)sizeof(ev.utf8), &ev.utf8_len)) {
+        ev.type = GOOT_EV_KEY;
+        ev.a    = (int32_t)sym;
+        ev.b    = mods;
+        ev.c    = ev.utf8_len;
+        push_ev(&ev);
+    }
+}
 
 void goot_wl_set_cursor_shape(int32_t shape) {
     if (!g_pointer || !g_shm || !g_display) return;
@@ -326,14 +386,19 @@ void goot_wl_set_cursor_shape(int32_t shape) {
     }
     if (!g_cursor_theme) return;
 
-    const char *names[3][3] = {
-        { "text", "xterm", "ibeam" },
-        { "default", "left_ptr", "arrow" },
-        { "pointer", "hand2", "hand" }
+    const char *names[7][4] = {
+        { "text", "xterm", "ibeam", NULL },
+        { "default", "left_ptr", "arrow", NULL },
+        { "pointer", "hand2", "hand", NULL },
+        { "ns-resize", "v_double_arrow", "size_ver", "s-resize" },
+        { "ew-resize", "h_double_arrow", "size_hor", "e-resize" },
+        { "nwse-resize", "size_fdiag", "top_left_corner", "bottom_right_corner" },
+        { "nesw-resize", "size_bdiag", "top_right_corner", "bottom_left_corner" },
     };
-    int idx = (shape >= 0 && shape <= 2) ? shape : 1;
+    int idx = (shape >= 0 && shape <= 6) ? shape : 1;
     struct wl_cursor *cur = NULL;
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < 4; k++) {
+        if (!names[idx][k]) break;
         cur = wl_cursor_theme_get_cursor(g_cursor_theme, names[idx][k]);
         if (cur) break;
     }
@@ -568,6 +633,10 @@ static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
         g_deco_mgr = wl_registry_bind(reg, name, &zxdg_decoration_manager_v1_interface, 1);
     } else if (strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name) == 0) {
         g_prim_mgr = wl_registry_bind(reg, name, &zwp_primary_selection_device_manager_v1_interface, 1);
+    } else if (strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0) {
+        g_fract_mgr = wl_registry_bind(reg, name, &wp_fractional_scale_manager_v1_interface, 1);
+    } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
+        g_viewporter = wl_registry_bind(reg, name, &wp_viewporter_interface, 1);
     }
 }
 static void registry_remove(void *data, struct wl_registry *reg, uint32_t name) { (void)data;(void)reg;(void)name; }
@@ -615,6 +684,7 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
         aid[app_id.len] = '\0';
     }
     xdg_toplevel_set_app_id(g_toplevel, aid);
+    xdg_toplevel_set_min_size(g_toplevel, 240, 160);
 
     if (g_deco_mgr && g_toplevel) {
         g_toplevel_deco = zxdg_decoration_manager_v1_get_toplevel_decoration(g_deco_mgr, g_toplevel);
@@ -626,6 +696,16 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
                 zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
             }
         }
+    }
+
+    if (g_fract_mgr && g_surface) {
+        g_fract_scale = wp_fractional_scale_manager_v1_get_fractional_scale(g_fract_mgr, g_surface);
+        if (g_fract_scale) {
+            wp_fractional_scale_v1_add_listener(g_fract_scale, &g_fract_scale_listener, NULL);
+        }
+    }
+    if (g_viewporter && g_surface) {
+        g_viewport = wp_viewporter_get_viewport(g_viewporter, g_surface);
     }
 
     wl_surface_commit(g_surface);
@@ -715,6 +795,12 @@ void goot_wl_set_decoration_mode(int32_t pref) {
 void goot_wl_toplevel_move(void) {
     if (g_toplevel && g_seat && g_last_serial > 0) {
         xdg_toplevel_move(g_toplevel, g_seat, g_last_serial);
+    }
+}
+
+void goot_wl_toplevel_resize(int32_t edges) {
+    if (g_toplevel && g_seat && g_last_serial > 0 && edges > 0) {
+        xdg_toplevel_resize(g_toplevel, g_seat, g_last_serial, (uint32_t)edges);
     }
 }
 
@@ -851,6 +937,10 @@ void goot_wl_close(void) {
     destroy_shm_buffer(&g_bufs[1]);
     if (g_cursor_surface) { wl_surface_destroy(g_cursor_surface); g_cursor_surface = NULL; }
     if (g_cursor_theme)   { wl_cursor_theme_destroy(g_cursor_theme); g_cursor_theme = NULL; }
+    if (g_fract_scale)    { wp_fractional_scale_v1_destroy(g_fract_scale); g_fract_scale = NULL; }
+    if (g_viewport)       { wp_viewport_destroy(g_viewport); g_viewport = NULL; }
+    if (g_fract_mgr)      { wp_fractional_scale_manager_v1_destroy(g_fract_mgr); g_fract_mgr = NULL; }
+    if (g_viewporter)     { wp_viewporter_destroy(g_viewporter); g_viewporter = NULL; }
     if (g_prim_src)       { zwp_primary_selection_source_v1_destroy(g_prim_src); g_prim_src = NULL; }
     if (g_prim_offer)     { zwp_primary_selection_offer_v1_destroy(g_prim_offer); g_prim_offer = NULL; }
     if (g_prim_dev)       { zwp_primary_selection_device_v1_destroy(g_prim_dev); g_prim_dev = NULL; }

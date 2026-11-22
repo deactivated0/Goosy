@@ -7,6 +7,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "goot_native.h"
+#include "goot_image.h"
 
 #include <pixman.h>
 #include <string.h>
@@ -262,9 +263,10 @@ static bool render_procedural_glyph(int32_t px, int32_t py, int32_t w, int32_t h
     return true;
 }
 
-void goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
-                      uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
-                      uint32_t attr_flags, int32_t span_cols) {
+void goot_render_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
+                          uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
+                          uint32_t attr_flags, int32_t span_cols,
+                          uint8_t ul_style, uint32_t ul_color) {
     if (!g_cur_img || cell_w <= 0 || cell_h <= 0) return;
     if (span_cols < 1) span_cols = 1;
     int32_t total_w = cell_w * span_cols;
@@ -286,9 +288,29 @@ void goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
                     PIXMAN_a8r8g8b8, g->width, g->height,
                     (uint32_t *)g->bitmap, g->stride);
                 if (src) {
-                    pixman_image_composite32(
-                        PIXMAN_OP_OVER, src, NULL, g_cur_img,
-                        0, 0, 0, 0, gx, gy, (uint32_t)g->width, (uint32_t)g->height);
+                    if (g->width > total_w || g->height > cell_h) {
+                        pixman_f_transform_t ft;
+                        pixman_f_transform_init_identity(&ft);
+                        double sx = (double)g->width / (double)total_w;
+                        double sy = (double)g->height / (double)cell_h;
+                        double sc = (sx > sy) ? sx : sy;
+                        pixman_f_transform_scale(&ft, NULL, sc, sc);
+                        pixman_transform_t t;
+                        pixman_transform_from_pixman_f_transform(&t, &ft);
+                        pixman_image_set_transform(src, &t);
+                        pixman_image_set_filter(src, PIXMAN_FILTER_BILINEAR, NULL, 0);
+                        int32_t dw = (int32_t)(g->width / sc);
+                        int32_t dh = (int32_t)(g->height / sc);
+                        int32_t ox = px + (total_w - dw) / 2;
+                        int32_t oy = py + (cell_h - dh) / 2;
+                        pixman_image_composite32(PIXMAN_OP_OVER, src, NULL, g_cur_img,
+                                                 0, 0, 0, 0, ox, oy, dw, dh);
+                    } else {
+                        int32_t ox = px + (total_w - g->width) / 2;
+                        int32_t oy = py + (cell_h - g->height) / 2;
+                        pixman_image_composite32(PIXMAN_OP_OVER, src, NULL, g_cur_img,
+                                                 0, 0, 0, 0, ox, oy, (uint32_t)g->width, (uint32_t)g->height);
+                    }
                     pixman_image_unref(src);
                 }
             } else {
@@ -308,16 +330,52 @@ void goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
         }
     }
 
-    /* 3. Underline (bit 2) & Strikethrough (bit 5) */
-    if (attr_flags & (1U << 2)) {
+    /* 3. Underline (bit 2 or ul_style > 0) */
+    if ((attr_flags & (1U << 2)) || ul_style > 0) {
+        uint32_t ucol = (ul_color != 0) ? ul_color : fg_rgb;
         int32_t uy = py + goot_font_baseline() + 2;
         if (uy >= py + cell_h) uy = py + cell_h - 1;
-        goot_render_fill_rect(px, uy, total_w, 1, fg_rgb);
+        if (ul_style == 2) {
+            /* Double underline */
+            goot_render_fill_rect(px, uy - 1, total_w, 1, ucol);
+            goot_render_fill_rect(px, uy + 1, total_w, 1, ucol);
+        } else if (ul_style == 3) {
+            /* Curly underline (undercurl) */
+            for (int32_t x = px; x < px + total_w; x++) {
+                int phase = (x - px) % 4;
+                int dy = (phase == 0 || phase == 1) ? 0 : 2;
+                goot_render_fill_rect(x, uy + dy, 1, 1, ucol);
+            }
+        } else if (ul_style == 4) {
+            /* Dotted underline */
+            for (int32_t x = px; x < px + total_w; x += 3) {
+                goot_render_fill_rect(x, uy, 1, 1, ucol);
+            }
+        } else if (ul_style == 5) {
+            /* Dashed underline */
+            for (int32_t x = px; x < px + total_w; x += 5) {
+                int32_t dw = (x + 3 <= px + total_w) ? 3 : (px + total_w - x);
+                goot_render_fill_rect(x, uy, dw, 1, ucol);
+            }
+        } else {
+            /* Single straight underline */
+            goot_render_fill_rect(px, uy, total_w, 1, ucol);
+        }
     }
+
+    /* 4. Strikethrough (bit 5) */
     if (attr_flags & (1U << 5)) {
         int32_t sy = py + cell_h / 2;
         goot_render_fill_rect(px, sy, total_w, 1, fg_rgb);
     }
+}
+
+void goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
+                      uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
+                      uint32_t attr_flags, int32_t span_cols) {
+    uint8_t ul_style = (attr_flags & (1U << 2)) ? 1 : 0;
+    goot_render_cell_ext(px, py, cell_w, cell_h, codepoint, fg_rgb, bg_rgb,
+                         attr_flags, span_cols, ul_style, 0);
 }
 
 void goot_render_cursor(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
@@ -331,6 +389,12 @@ void goot_render_cursor(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
     } else {
         goot_render_fill_rect(px, py, cell_w, cell_h, color_rgb);
     }
+}
+
+void goot_render_images(int32_t pad_px, int32_t title_h, int32_t view_top_abs_row,
+                        int32_t rows, int32_t cols, int32_t cell_w, int32_t cell_h) {
+    if (!g_cur_img) return;
+    goot_image_render(g_cur_img, pad_px, title_h, view_top_abs_row, rows, cols, cell_w, cell_h);
 }
 
 void goot_render_end(bool request_frame_cb) {

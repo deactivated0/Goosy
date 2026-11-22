@@ -25,6 +25,23 @@ else
     echo "[goot] Preserving existing config at $CFG_DIR/goot.ini"
 fi
 
+# Install application icon into hicolor theme
+if [ -f "$ROOT_DIR/assets/goot.png" ]; then
+    ICON_BASE="$PREFIX/share/icons/hicolor"
+    mkdir -p "$PREFIX/share/pixmaps"
+    install -m 644 "$ROOT_DIR/assets/goot.png" "$PREFIX/share/pixmaps/goot.png"
+    for sz in 32 48 64 128 256 512; do
+        mkdir -p "$ICON_BASE/${sz}x${sz}/apps"
+        if command -v magick >/dev/null 2>&1; then
+            magick "$ROOT_DIR/assets/goot.png" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goot.png"
+        elif command -v convert >/dev/null 2>&1; then
+            convert "$ROOT_DIR/assets/goot.png" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goot.png"
+        else
+            install -m 644 "$ROOT_DIR/assets/goot.png" "$ICON_BASE/${sz}x${sz}/apps/goot.png"
+        fi
+    done
+fi
+
 cat > "$APP_DIR/goot.desktop" <<EOF
 [Desktop Entry]
 Type=Application
@@ -32,6 +49,7 @@ Name=Goot
 GenericName=Terminal Emulator
 Comment=Native Wayland terminal emulator written in Goose
 Exec=$BIN_DIR/goot
+Icon=goot
 Terminal=false
 Categories=System;TerminalEmulator;
 StartupNotify=false

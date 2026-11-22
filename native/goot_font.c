@@ -214,8 +214,24 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
     if ((style_flags & 1) && g_face_bold)      face = g_face_bold;
     else if ((style_flags & 2) && g_face_ital) face = g_face_ital;
 
-    FT_UInt gid = FT_Get_Char_Index(face, codepoint);
+    FT_UInt gid = 0;
     FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+
+    bool is_emoji_range = (codepoint >= 0x1F000 && codepoint <= 0x1FAFF) ||
+                          (codepoint >= 0x2600  && codepoint <= 0x27BF)  ||
+                          (codepoint >= 0xFE00  && codepoint <= 0xFE0F);
+    if (is_emoji_range && g_face_emoji) {
+        FT_UInt egid = FT_Get_Char_Index(g_face_emoji, codepoint);
+        if (egid != 0) {
+            face = g_face_emoji;
+            gid  = egid;
+            load_flags = FT_LOAD_RENDER | FT_LOAD_COLOR;
+        }
+    }
+
+    if (gid == 0) {
+        gid = FT_Get_Char_Index(face, codepoint);
+    }
     if (gid == 0 && g_face_emoji) {
         FT_UInt egid = FT_Get_Char_Index(g_face_emoji, codepoint);
         if (egid != 0) {
@@ -231,9 +247,13 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
             if (fbgid != 0) {
                 face = fb;
                 gid  = fbgid;
-                load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+                load_flags = FT_LOAD_RENDER | (FT_HAS_COLOR(fb) ? FT_LOAD_COLOR : FT_LOAD_TARGET_NORMAL);
             }
         }
+    }
+
+    if (FT_HAS_COLOR(face)) {
+        load_flags = FT_LOAD_RENDER | FT_LOAD_COLOR;
     }
 
     goot_glyph_t *g = &g_cache[idx].glyph;
@@ -268,6 +288,61 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
         }
     }
     return g;
+}
+
+const goot_glyph_t *goot_font_shape_ligature(const uint32_t *cps, int32_t len, uint8_t style_flags) {
+    if (!g_hb_reg || !cps || len < 2 || len > 4) return NULL;
+    FT_Face face = g_face_reg;
+    if ((style_flags & 1) && g_face_bold) face = g_face_bold;
+    else if ((style_flags & 2) && g_face_ital) face = g_face_ital;
+
+    hb_buffer_t *buf = hb_buffer_create();
+    if (!buf) return NULL;
+    hb_buffer_add_codepoints(buf, cps, len, 0, len);
+    hb_buffer_guess_segment_properties(buf);
+    hb_shape(g_hb_reg, buf, NULL, 0);
+
+    unsigned int count = 0;
+    hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buf, &count);
+    if (count < (unsigned int)len && count > 0 && infos) {
+        uint32_t gid = infos[0].codepoint;
+        hb_buffer_destroy(buf);
+        if (FT_Load_Glyph(face, gid, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) == 0) {
+            static goot_glyph_t s_lig;
+            static uint8_t *s_lig_bmp = NULL;
+            if (s_lig_bmp) { free(s_lig_bmp); s_lig_bmp = NULL; }
+            FT_GlyphSlot slot = face->glyph;
+            s_lig.width     = (int32_t)slot->bitmap.width;
+            s_lig.height    = (int32_t)slot->bitmap.rows;
+            s_lig.bearing_x = (int32_t)slot->bitmap_left;
+            s_lig.bearing_y = (int32_t)slot->bitmap_top;
+            s_lig.advance   = (int32_t)(slot->advance.x >> 6);
+            s_lig.is_color  = 0;
+            if (s_lig.width > 0 && s_lig.height > 0 && slot->bitmap.buffer) {
+                size_t rowstride = ((size_t)s_lig.width + 3U) & ~3U;
+                s_lig.stride = (int32_t)rowstride;
+                s_lig_bmp = (uint8_t *)calloc(1, rowstride * (size_t)s_lig.height);
+                s_lig.bitmap = s_lig_bmp;
+                if (s_lig_bmp) {
+                    int32_t pitch = slot->bitmap.pitch;
+                    for (int32_t r = 0; r < s_lig.height; r++) {
+                        const uint8_t *src = slot->bitmap.buffer + (size_t)r * (size_t)(pitch >= 0 ? pitch : -pitch);
+                        memcpy(s_lig_bmp + (size_t)r * rowstride, src, (size_t)s_lig.width);
+                    }
+                }
+            }
+            return &s_lig;
+        }
+        return NULL;
+    }
+    hb_buffer_destroy(buf);
+    return NULL;
+}
+
+int32_t goot_font_is_rtl(uint32_t cp) {
+    return ((cp >= 0x0590 && cp <= 0x08FF) ||
+            (cp >= 0xFB1D && cp <= 0xFDFF) ||
+            (cp >= 0xFE70 && cp <= 0xFEFF)) ? 1 : 0;
 }
 
 void goot_font_close(void) {

@@ -15,6 +15,13 @@ let ATTR_STRIKE: u16    = 32;
 let ATTR_DIM: u16       = 64;
 let ATTR_HIDDEN: u16    = 128;
 
+let UL_NONE: u8   = 0;
+let UL_SINGLE: u8 = 1;
+let UL_DOUBLE: u8 = 2;
+let UL_CURLY: u8  = 3;
+let UL_DOTTED: u8 = 4;
+let UL_DASHED: u8 = 5;
+
 let CELL_WIDE_CONT: u8  = 1;
 
 let SEL_CHAR: i32  = 0;
@@ -34,6 +41,9 @@ struct Cell {
     attrs: u16 = 0,
     width: u8 = 1,
     flags: u8 = 0,
+    ul_style: u8 = 0,
+    ul_color: u32 = 0,
+    link_id: u32 = 0,
 }
 
 root struct Screen {
@@ -53,6 +63,9 @@ root struct Screen {
     cur_fg: u32 = 0xEAEAEA,
     cur_bg: u32 = 0x000000,
     cur_attrs: u16 = 0,
+    cur_ul_style: u8 = 0,
+    cur_ul_color: u32 = 0,
+    cur_link_id: u32 = 0,
     default_fg: u32 = 0xEAEAEA,
     default_bg: u32 = 0x000000,
 
@@ -93,13 +106,41 @@ root struct Screen {
     tab_stops: u8[>..] = [],
     prompt_rows: u8[>..] = [],
     sb_prompt_rows: u8[>..] = [],
+    wrapped_rows: u8[>..] = [],
+    sb_wrapped_rows: u8[>..] = [],
+    hyperlinks: u8[>..] = [],
+    hyperlink_offsets: i32[>..] = [],
+    hyperlink_lengths: i32[>..] = [],
     reply_buf: u8[>..] = [],
+}
+
+fn add_hyperlink(s: Screen&, url: const u8[:]) -> u32 {
+    if url.len == 0 { return 0; }
+    let id = (s.hyperlink_offsets.len as u32) + 1;
+    let off = s.hyperlinks.len as i32;
+    s.hyperlink_offsets.push(off);
+    s.hyperlink_lengths.push(url.len as i32);
+    for i in 0..url.len { s.hyperlinks.push(url[i]); }
+    return id;
+}
+
+fn get_hyperlink(s: Screen&, id: u32, out: u8[>..]&) -> bool {
+    out.clear();
+    if id == 0 { return false; }
+    let idx = (id - 1) as i64;
+    if idx < 0 || idx >= s.hyperlink_offsets.len { return false; }
+    let off = s.hyperlink_offsets[idx] as i64;
+    let len = s.hyperlink_lengths[idx] as i64;
+    if off < 0 || off + len > s.hyperlinks.len { return false; }
+    for i in 0..len { out.push(s.hyperlinks[off + i]); }
+    return true;
 }
 
 fn blank_cell(s: Screen&) -> Cell {
     return Cell {
         cp: 0x20, combining: 0, fg: s.default_fg, bg: s.default_bg,
         attrs: 0, width: 1, flags: 0,
+        ul_style: 0, ul_color: 0, link_id: 0,
     };
 }
 
@@ -107,6 +148,7 @@ fn erase_cell(s: Screen&) -> Cell {
     return Cell {
         cp: 0x20, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
         attrs: 0, width: 1, flags: 0,
+        ul_style: 0, ul_color: 0, link_id: 0,
     };
 }
 
@@ -149,6 +191,7 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     s.scroll_top = 0; s.scroll_bottom = r - 1;
     s.default_fg = fg; s.default_bg = bg;
     s.cur_fg = fg; s.cur_bg = bg; s.cur_attrs = 0;
+    s.cur_ul_style = 0; s.cur_ul_color = 0; s.cur_link_id = 0;
     s.cursor_style = cursor_style;
     s.cursor_visible = true;
     s.alt_screen = false;
@@ -170,11 +213,17 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
 
     s.dirty_rows.clear();
     s.prompt_rows.clear();
+    s.wrapped_rows.clear();
     for _ in 0..r {
         s.dirty_rows.push(2);
         s.prompt_rows.push(0);
+        s.wrapped_rows.push(0);
     }
     reset_tabs(s);
+
+    s.hyperlinks.clear();
+    s.hyperlink_offsets.clear();
+    s.hyperlink_lengths.clear();
 
     let cap = if sb_lines < 0 { 0 } else if sb_lines > 100000 { 100000 } else { sb_lines };
     s.sb_cap_lines = cap;
@@ -184,10 +233,11 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     s.view_offset = 0;
     s.sb_cells.clear();
     s.sb_prompt_rows.clear();
+    s.sb_wrapped_rows.clear();
     if cap > 0 {
         let sb_total = (cap as i64) * (c as i64);
         for _ in 0..sb_total { s.sb_cells.push(b); }
-        for _ in 0..cap { s.sb_prompt_rows.push(0); }
+        for _ in 0..cap { s.sb_prompt_rows.push(0); s.sb_wrapped_rows.push(0); }
     }
     s.full_redraw_frames = 2;
 }
@@ -218,12 +268,16 @@ fn push_scrollback_row(s: Screen&, row: i32) {
     let dst_line = (s.sb_head + s.sb_count) % s.sb_cap_lines;
     if s.sb_count == s.sb_cap_lines {
         s.sb_head = (s.sb_head + 1) % s.sb_cap_lines;
+        ffi::image_scroll(1);
     } else {
         s.sb_count += 1;
     }
 
     if (dst_line as i64) < s.sb_prompt_rows.len && (row as i64) < s.prompt_rows.len {
         s.sb_prompt_rows[dst_line] = s.prompt_rows[row];
+    }
+    if (dst_line as i64) < s.sb_wrapped_rows.len && (row as i64) < s.wrapped_rows.len {
+        s.sb_wrapped_rows[dst_line] = s.wrapped_rows[row];
     }
 
     let copy_cols = if s.cols < s.sb_cols { s.cols } else { s.sb_cols };
@@ -256,6 +310,9 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
         if (r as i64) < s.prompt_rows.len && ((r + count) as i64) < s.prompt_rows.len {
             s.prompt_rows[r] = s.prompt_rows[r + count];
         }
+        if (r as i64) < s.wrapped_rows.len && ((r + count) as i64) < s.wrapped_rows.len {
+            s.wrapped_rows[r] = s.wrapped_rows[r + count];
+        }
         mark_row_dirty(s, r);
     }
 
@@ -264,6 +321,7 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
         let base = (r as i64) * (s.cols as i64);
         for c in 0..s.cols { s.cells[base + (c as i64)] = ec; }
         if (r as i64) < s.prompt_rows.len { s.prompt_rows[r] = 0; }
+        if (r as i64) < s.wrapped_rows.len { s.wrapped_rows[r] = 0; }
         mark_row_dirty(s, r);
     }
 }
@@ -280,6 +338,9 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
         if (r as i64) < s.prompt_rows.len && ((r - count) as i64) < s.prompt_rows.len {
             s.prompt_rows[r] = s.prompt_rows[r - count];
         }
+        if (r as i64) < s.wrapped_rows.len && ((r - count) as i64) < s.wrapped_rows.len {
+            s.wrapped_rows[r] = s.wrapped_rows[r - count];
+        }
         mark_row_dirty(s, r);
         r -= 1;
     }
@@ -289,6 +350,7 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
         let base = (r2 as i64) * (s.cols as i64);
         for c in 0..s.cols { s.cells[base + (c as i64)] = ec; }
         if (r2 as i64) < s.prompt_rows.len { s.prompt_rows[r2] = 0; }
+        if (r2 as i64) < s.wrapped_rows.len { s.wrapped_rows[r2] = 0; }
         mark_row_dirty(s, r2);
     }
 }
@@ -336,13 +398,21 @@ fn put_codepoint(s: Screen&, cp: u32) {
 
     if s.wrap_pending {
         s.wrap_pending = false;
-        if s.autowrap { s.cx = 0; linefeed(s); }
+        if s.autowrap {
+            if s.cy >= 0 && (s.cy as i64) < s.wrapped_rows.len {
+                s.wrapped_rows[s.cy] = 1;
+            }
+            s.cx = 0; linefeed(s);
+        }
     }
 
     if w == 2 && s.cx == s.cols - 1 && s.autowrap {
         let pad_idx = (s.cy as i64) * (s.cols as i64) + (s.cx as i64);
         s.cells[pad_idx] = erase_cell(s);
         mark_row_dirty(s, s.cy);
+        if s.cy >= 0 && (s.cy as i64) < s.wrapped_rows.len {
+            s.wrapped_rows[s.cy] = 1;
+        }
         s.cx = 0;
         linefeed(s);
     }
@@ -351,12 +421,14 @@ fn put_codepoint(s: Screen&, cp: u32) {
     s.cells[idx] = Cell {
         cp: cp, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
         attrs: s.cur_attrs, width: w as! u8, flags: 0,
+        ul_style: s.cur_ul_style, ul_color: s.cur_ul_color, link_id: s.cur_link_id,
     };
 
     if w == 2 && s.cx + 1 < s.cols {
         s.cells[idx + 1] = Cell {
             cp: 0, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
             attrs: s.cur_attrs, width: 0, flags: CELL_WIDE_CONT,
+            ul_style: s.cur_ul_style, ul_color: s.cur_ul_color, link_id: s.cur_link_id,
         };
     }
 
@@ -496,32 +568,184 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
     let nr = if new_rows < 2 { 2 } else if new_rows > MAX_ROWS { MAX_ROWS } else { new_rows };
     if nc == s.cols && nr == s.rows { return; }
 
-    var next_cells: Cell[>..] = [];
     let b = blank_cell(s);
-    let total = (nc as i64) * (nr as i64);
-    for _ in 0..total { next_cells.push(b); }
 
-    let min_r = if nr < s.rows { nr } else { s.rows };
-    let min_c = if nc < s.cols { nc } else { s.cols };
-    for r in 0..min_r {
-        let src = (r as i64) * (s.cols as i64);
-        let dst = (r as i64) * (nc as i64);
-        for c in 0..min_c { next_cells[dst + (c as i64)] = s.cells[src + (c as i64)]; }
+    if nc == s.cols {
+        var next_cells: Cell[>..] = [];
+        let total = (nc as i64) * (nr as i64);
+        for _ in 0..total { next_cells.push(b); }
+        let min_r = if nr < s.rows { nr } else { s.rows };
+        for r in 0..min_r {
+            let src = (r as i64) * (s.cols as i64);
+            let dst = (r as i64) * (nc as i64);
+            for c in 0..s.cols { next_cells[dst + (c as i64)] = s.cells[src + (c as i64)]; }
+        }
+        s.cells.clear();
+        for i in 0..total { s.cells.push(next_cells[i]); }
+        s.alt_cells.clear();
+        for _ in 0..total { s.alt_cells.push(b); }
+        s.rows = nr;
+        s.scroll_top = 0; s.scroll_bottom = nr - 1;
+        clamp_cursor(s);
+        s.dirty_rows.clear();
+        s.prompt_rows.clear();
+        s.wrapped_rows.clear();
+        for _ in 0..nr { s.dirty_rows.push(2); s.prompt_rows.push(0); s.wrapped_rows.push(0); }
+        reset_tabs(s);
+        s.sel_active = false;
+        s.full_redraw_frames = 2;
+        return;
     }
 
-    s.cells.clear();
-    for i in 0..total { s.cells.push(next_cells[i]); }
-    s.alt_cells.clear();
-    for _ in 0..total { s.alt_cells.push(b); }
+    // Full column reflow: collect logical lines from scrollback + live screen
+    var logical_lines: Cell[>..] = [];
+    var line_offsets: i32[>..] = [];
+    var line_lengths: i32[>..] = [];
+    var line_prompts: u8[>..] = [];
+
+    let total_src_lines = s.sb_count + s.rows;
+    var line_start: i64 = 0;
+    var cur_line_len: i32 = 0;
+    var cur_line_prompt: u8 = 0;
+
+    for abs_r in 0..total_src_lines {
+        let is_sb = abs_r < s.sb_count;
+        let is_wrapped = if is_sb {
+            let lidx = (s.sb_head + abs_r) % s.sb_cap_lines;
+            if (lidx as i64) < s.sb_wrapped_rows.len { s.sb_wrapped_rows[lidx] } else { 0 }
+        } else {
+            let lr = abs_r - s.sb_count;
+            if (lr as i64) < s.wrapped_rows.len { s.wrapped_rows[lr] } else { 0 }
+        };
+        let is_prompt = if is_sb {
+            let lidx = (s.sb_head + abs_r) % s.sb_cap_lines;
+            if (lidx as i64) < s.sb_prompt_rows.len { s.sb_prompt_rows[lidx] } else { 0 }
+        } else {
+            let lr = abs_r - s.sb_count;
+            if (lr as i64) < s.prompt_rows.len { s.prompt_rows[lr] } else { 0 }
+        };
+        if cur_line_len == 0 && is_prompt != 0 { cur_line_prompt = 1; }
+
+        let cols_in_row = if is_sb { s.sb_cols } else { s.cols };
+        var row_end: i32 = cols_in_row;
+        if is_wrapped == 0 {
+            while row_end > 0 {
+                let cell = history_cell(s, abs_r, row_end - 1);
+                if cell.cp != 0x20 || cell.attrs != 0 || cell.combining != 0 || cell.link_id != 0 {
+                    break;
+                }
+                row_end -= 1;
+            }
+        }
+        for c in 0..row_end {
+            logical_lines.push(history_cell(s, abs_r, c));
+            cur_line_len += 1;
+        }
+
+        if is_wrapped == 0 {
+            line_offsets.push(line_start as i32);
+            line_lengths.push(cur_line_len);
+            line_prompts.push(cur_line_prompt);
+            line_start = logical_lines.len;
+            cur_line_len = 0;
+            cur_line_prompt = 0;
+        }
+    }
+
+    var reflowed_rows: Cell[>..] = [];
+    var reflowed_wrapped: u8[>..] = [];
+    var reflowed_prompts: u8[>..] = [];
+
+    for l in 0..line_lengths.len {
+        let off = line_offsets[l] as i64;
+        let len = line_lengths[l];
+        let pmt = line_prompts[l];
+
+        if len == 0 {
+            for _ in 0..nc { reflowed_rows.push(b); }
+            reflowed_wrapped.push(0);
+            reflowed_prompts.push(pmt);
+            continue;
+        }
+
+        var rem = len;
+        var src_idx = off;
+        var first_subrow = true;
+        while rem > 0 {
+            let take = if rem < nc { rem } else { nc };
+            for c in 0..nc {
+                if c < take {
+                    reflowed_rows.push(logical_lines[src_idx]);
+                    src_idx += 1;
+                } else {
+                    reflowed_rows.push(b);
+                }
+            }
+            rem -= take;
+            reflowed_wrapped.push(if rem > 0 { 1 } else { 0 });
+            reflowed_prompts.push(if first_subrow { pmt } else { 0 });
+            first_subrow = false;
+        }
+    }
+
+    let total_reflowed = reflowed_wrapped.len as i32;
+    var live_start_row = total_reflowed - nr;
+    if live_start_row < 0 { live_start_row = 0; }
+    let sb_count = live_start_row;
 
     s.cols = nc; s.rows = nr;
+    s.sb_cols = nc;
+    s.sb_head = 0;
+    s.sb_count = if sb_count > s.sb_cap_lines { s.sb_cap_lines } else { sb_count };
+    s.view_offset = 0;
+
+    s.cells.clear();
+    s.wrapped_rows.clear();
+    s.prompt_rows.clear();
+    s.dirty_rows.clear();
+    for _ in 0..nr {
+        s.wrapped_rows.push(0);
+        s.prompt_rows.push(0);
+        s.dirty_rows.push(2);
+    }
+    for _ in 0..((nc as i64) * (nr as i64)) { s.cells.push(b); }
+
+    let live_rows_to_copy = if total_reflowed - live_start_row < nr { total_reflowed - live_start_row } else { nr };
+    for r in 0..live_rows_to_copy {
+        let src_r = live_start_row + r;
+        let src_base = (src_r as i64) * (nc as i64);
+        let dst_base = (r as i64) * (nc as i64);
+        for c in 0..nc {
+            s.cells[dst_base + (c as i64)] = reflowed_rows[src_base + (c as i64)];
+        }
+        s.wrapped_rows[r] = reflowed_wrapped[src_r];
+        s.prompt_rows[r] = reflowed_prompts[src_r];
+    }
+
+    s.sb_cells.clear();
+    s.sb_prompt_rows.clear();
+    s.sb_wrapped_rows.clear();
+    if s.sb_cap_lines > 0 {
+        for _ in 0..((s.sb_cap_lines as i64) * (nc as i64)) { s.sb_cells.push(b); }
+        for _ in 0..s.sb_cap_lines { s.sb_prompt_rows.push(0); s.sb_wrapped_rows.push(0); }
+
+        let sb_take_start = if sb_count > s.sb_cap_lines { sb_count - s.sb_cap_lines } else { 0 };
+        let sb_take_count = sb_count - sb_take_start;
+        for i in 0..sb_take_count {
+            let src_r = sb_take_start + i;
+            let src_base = (src_r as i64) * (nc as i64);
+            let dst_base = (i as i64) * (nc as i64);
+            for c in 0..nc {
+                s.sb_cells[dst_base + (c as i64)] = reflowed_rows[src_base + (c as i64)];
+            }
+            s.sb_wrapped_rows[i] = reflowed_wrapped[src_r];
+            s.sb_prompt_rows[i] = reflowed_prompts[src_r];
+        }
+    }
+
     s.scroll_top = 0; s.scroll_bottom = nr - 1;
     s.wrap_pending = false;
     clamp_cursor(s);
-
-    s.dirty_rows.clear();
-    s.prompt_rows.clear();
-    for _ in 0..nr { s.dirty_rows.push(2); s.prompt_rows.push(0); }
     reset_tabs(s);
     s.sel_active = false;
     s.full_redraw_frames = 2;

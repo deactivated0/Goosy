@@ -61,7 +61,8 @@ enum {
     GOOT_POLL_WAYLAND = 1 << 0,
     GOOT_POLL_PTY     = 1 << 1,
     GOOT_POLL_SIGNAL  = 1 << 2,
-    GOOT_POLL_PTY_HUP = 1 << 3
+    GOOT_POLL_PTY_HUP = 1 << 3,
+    GOOT_POLL_TIMER   = 1 << 4
 };
 
 /* -------------------------------------------------------------------------
@@ -93,6 +94,8 @@ int32_t goot_open_url(goot_const_bytes_t url);
 int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd);
 int32_t goot_poll_wait(int32_t timeout_ms);
 int32_t goot_poll_terminated(void);
+void    goot_poll_arm_repeat(int32_t delay_ms, int32_t interval_ms);
+void    goot_poll_disarm_repeat(void);
 void    goot_poll_close(void);
 int64_t goot_time_monotonic_ns(void);
 
@@ -121,8 +124,10 @@ int32_t goot_wl_is_activated(void);
 int32_t goot_wl_is_csd(void);
 void    goot_wl_set_decoration_mode(int32_t pref);
 void    goot_wl_toplevel_move(void);
+void    goot_wl_toplevel_resize(int32_t edges);
 void    goot_wl_toplevel_minimize(void);
 void    goot_wl_toplevel_toggle_maximize(void);
+void    goot_wl_handle_timer_repeat(void);
 void    goot_wl_set_cursor_shape(int32_t shape);
 int32_t goot_wl_clipboard_set(goot_const_bytes_t text);
 int32_t goot_wl_clipboard_request(void);
@@ -182,20 +187,34 @@ int32_t goot_font_cell_width(void);
 int32_t goot_font_cell_height(void);
 int32_t goot_font_baseline(void);
 const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags);
-void    goot_font_close(void);
+const goot_glyph_t *goot_font_shape_ligature(const uint32_t *cps, int32_t len, uint8_t style_flags);
+int32_t             goot_font_is_rtl(uint32_t cp);
+void                goot_font_close(void);
 
 /* -------------------------------------------------------------------------
- * Pixman Software Renderer API (native/goot_render.c)
+ * Pixman Software Renderer & Graphics API (native/goot_render.c, goot_image.c)
  * ------------------------------------------------------------------------- */
 int32_t goot_render_begin(uint32_t bg_rgb);
 void    goot_render_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t rgb);
 void    goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
                          uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
                          uint32_t attr_flags, int32_t span_cols);
+void    goot_render_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
+                             uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
+                             uint32_t attr_flags, int32_t span_cols,
+                             uint8_t ul_style, uint32_t ul_color);
 void    goot_render_cursor(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
                            uint32_t color_rgb, int32_t style);
 void    goot_render_damage(int32_t x, int32_t y, int32_t w, int32_t h);
+void    goot_render_images(int32_t pad_px, int32_t title_h, int32_t view_top_abs_row,
+                           int32_t rows, int32_t cols, int32_t cell_w, int32_t cell_h);
 void    goot_render_end(bool request_frame_cb);
+
+/* Sixel & Kitty Graphics */
+int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h);
+int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h);
+void    goot_image_scroll(int32_t evicted_lines);
+void    goot_image_clear(void);
 
 /* -------------------------------------------------------------------------
  * Config / Environment Helper API (native/goot_pty.c)

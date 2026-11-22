@@ -9,9 +9,12 @@ c_sources = [
     "native/goot_wayland.c",
     "native/goot_font.c",
     "native/goot_render.c",
+    "native/goot_image.c",
     "native/generated/xdg-shell-protocol.c",
     "native/generated/xdg-decoration-unstable-v1-protocol.c",
     "native/generated/primary-selection-unstable-v1-protocol.c",
+    "native/generated/fractional-scale-v1-protocol.c",
+    "native/generated/viewporter-protocol.c",
 ];
 
 c_include = [
@@ -43,6 +46,7 @@ c_libs_linux = [
     "fontconfig",
     "harfbuzz",
     "xkbcommon",
+    "png",
     "m",
 ];
 

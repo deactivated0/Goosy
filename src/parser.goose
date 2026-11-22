@@ -5,6 +5,7 @@
 namespace parser;
 
 import src.colors;
+import src.ffi;
 import src.screen;
 import src.utf8;
 
@@ -16,11 +17,13 @@ let ST_CSI_PARAM  = 4;
 let ST_CSI_IGNORE = 5;
 let ST_OSC_STRING = 6;
 let ST_DCS_IGNORE = 7;
+let ST_DCS_DATA   = 8;
+let ST_APC_DATA   = 9;
 
 let MAX_PARAMS = 16;
 let MAX_OSC    = 512;
 
-struct Parser {
+root struct Parser {
     state: i32 = 0,
     utf8_dec: utf8::Decoder = utf8::Decoder { .. },
     params: i32[16] = [0; 16],
@@ -30,12 +33,26 @@ struct Parser {
     private_prefix: u8 = 0,
     intermediate: u8 = 0,
     osc_esc_seen: bool = false,
+    esc_seen: bool = false,
     osc_buf: u8[..512] = [],
+    dcs_buf: u8[>..] = [],
+    apc_buf: u8[>..] = [],
     allow_osc52: bool = false,
 }
 
-fn new_parser(allow_osc52: bool) -> Parser {
-    return Parser { allow_osc52: allow_osc52, .. };
+fn init(p: Parser&, allow_osc52: bool) {
+    p.state = 0;
+    p.param_count = 0;
+    p.cur_param = 0;
+    p.has_param = false;
+    p.private_prefix = 0;
+    p.intermediate = 0;
+    p.osc_esc_seen = false;
+    p.esc_seen = false;
+    p.osc_buf.clear();
+    p.dcs_buf.clear();
+    p.apc_buf.clear();
+    p.allow_osc52 = allow_osc52;
 }
 
 fn clear_csi(p: Parser&) {
@@ -67,14 +84,32 @@ fn apply_sgr(p: Parser&, s: screen::Screen&, pal: colors::Palette&) {
             1 => { s.cur_attrs = s.cur_attrs | screen::ATTR_BOLD; },
             2 => { s.cur_attrs = s.cur_attrs | screen::ATTR_DIM; },
             3 => { s.cur_attrs = s.cur_attrs | screen::ATTR_ITALIC; },
-            4 => { s.cur_attrs = s.cur_attrs | screen::ATTR_UNDERLINE; },
+            4 => {
+                if i + 1 < p.param_count && (p.params[i + 1] >= 0 && p.params[i + 1] <= 5) {
+                    let sub = p.params[i + 1];
+                    if sub == 0 {
+                        s.cur_attrs = s.cur_attrs & ~screen::ATTR_UNDERLINE;
+                        s.cur_ul_style = screen::UL_NONE;
+                    } else {
+                        s.cur_attrs = s.cur_attrs | screen::ATTR_UNDERLINE;
+                        s.cur_ul_style = sub as! u8;
+                    }
+                    i += 1;
+                } else {
+                    s.cur_attrs = s.cur_attrs | screen::ATTR_UNDERLINE;
+                    s.cur_ul_style = screen::UL_SINGLE;
+                }
+            },
             5, 6 => { s.cur_attrs = s.cur_attrs | screen::ATTR_BLINK; },
             7 => { s.cur_attrs = s.cur_attrs | screen::ATTR_INVERSE; },
             8 => { s.cur_attrs = s.cur_attrs | screen::ATTR_HIDDEN; },
             9 => { s.cur_attrs = s.cur_attrs | screen::ATTR_STRIKE; },
             22 => { s.cur_attrs = s.cur_attrs & ~(screen::ATTR_BOLD | screen::ATTR_DIM); },
             23 => { s.cur_attrs = s.cur_attrs & ~screen::ATTR_ITALIC; },
-            24 => { s.cur_attrs = s.cur_attrs & ~screen::ATTR_UNDERLINE; },
+            24 => {
+                s.cur_attrs = s.cur_attrs & ~screen::ATTR_UNDERLINE;
+                s.cur_ul_style = screen::UL_NONE;
+            },
             25 => { s.cur_attrs = s.cur_attrs & ~screen::ATTR_BLINK; },
             27 => { s.cur_attrs = s.cur_attrs & ~screen::ATTR_INVERSE; },
             28 => { s.cur_attrs = s.cur_attrs & ~screen::ATTR_HIDDEN; },
@@ -83,6 +118,21 @@ fn apply_sgr(p: Parser&, s: screen::Screen&, pal: colors::Palette&) {
             39 => { s.cur_fg = pal.fg; },
             40..48 => { s.cur_bg = pal.ansi[code - 40]; },
             49 => { s.cur_bg = pal.bg; },
+            58 => {
+                if i + 2 < p.param_count && p.params[i + 1] == 5 {
+                    s.cur_ul_color = colors::resolve_256(pal, p.params[i + 2]);
+                    i += 2;
+                } else if i + 5 < p.param_count && p.params[i + 1] == 2 {
+                    s.cur_ul_color = colors::pack_rgb(p.params[i + 3] as u32, p.params[i + 4] as u32, p.params[i + 5] as u32);
+                    i += 5;
+                } else if i + 4 < p.param_count && p.params[i + 1] == 2 {
+                    s.cur_ul_color = colors::pack_rgb(p.params[i + 2] as u32, p.params[i + 3] as u32, p.params[i + 4] as u32);
+                    i += 4;
+                }
+            },
+            59 => {
+                s.cur_ul_color = 0;
+            },
             90..98 => { s.cur_fg = pal.ansi[code - 90 + 8]; },
             100..108 => { s.cur_bg = pal.ansi[code - 100 + 8]; },
             38, 48 => {
@@ -280,6 +330,20 @@ fn dispatch_osc(p: Parser&, s: screen::Screen&) {
         s.title_dirty = true;
     } else if cmd == 7 {
         parse_osc7_cwd(s, payload);
+    } else if cmd == 8 {
+        // OSC 8: Hyperlinks: \x1b]8;params;url\x1b\
+        var semi2: i64 = -1;
+        for i in 0..payload.len {
+            if payload[i] == ';' { semi2 = i; break; }
+        }
+        if semi2 >= 0 {
+            let url = payload[(semi2 + 1)..];
+            if url.len == 0 {
+                s.cur_link_id = 0;
+            } else {
+                s.cur_link_id = screen::add_hyperlink(s, url);
+            }
+        }
     } else if cmd == 133 {
         // Shell integration: OSC 133;A marks prompt start for Ctrl+Shift+Z/X
         if payload.len >= 1 && payload[0] == 'A' {
@@ -321,14 +385,16 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
         match b {
             '[' => { clear_csi(p); p.state = ST_CSI_ENTRY; },
             ']' => { p.osc_buf.clear(); p.osc_esc_seen = false; p.state = ST_OSC_STRING; },
-            'P', '^', '_' => { p.state = ST_DCS_IGNORE; },
+            'P' => { p.dcs_buf.clear(); p.esc_seen = false; p.state = ST_DCS_DATA; },
+            '_' => { p.apc_buf.clear(); p.esc_seen = false; p.state = ST_APC_DATA; },
+            '^' => { p.state = ST_DCS_IGNORE; },
             '7' => { s.saved_cx = s.cx; s.saved_cy = s.cy; p.state = ST_GROUND; },
             '8' => { screen::set_cursor(s, s.saved_cx, s.saved_cy); p.state = ST_GROUND; },
             'D' => { screen::linefeed(s); p.state = ST_GROUND; },
             'E' => { s.cx = 0; screen::linefeed(s); p.state = ST_GROUND; },
             'M' => { screen::reverse_index(s); p.state = ST_GROUND; },
             'H' => { if (s.cx as i64) < s.tab_stops.len { s.tab_stops[s.cx] = 1; } p.state = ST_GROUND; },
-            'c' => { screen::init(s, s.cols, s.rows, pal.fg, pal.bg, s.sb_cap_lines, s.cursor_style); p.state = ST_GROUND; },
+            'c' => { screen::init(s, s.cols, s.rows, pal.fg, pal.bg, s.sb_cap_lines, s.cursor_style); ffi::image_clear(); p.state = ST_GROUND; },
             '(', ')', '*', '+', '#', '%' => { p.state = ST_ESC_INT; },
             _ => { p.state = ST_GROUND; },
         }
@@ -379,6 +445,73 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
 
     if p.state == ST_DCS_IGNORE {
         if b == 0x1B || b == 0x9C || b == 0x07 { p.state = ST_GROUND; }
+        return;
+    }
+
+    if p.state == ST_DCS_DATA {
+        if b == 0x07 {
+            let cw = ffi::font_cell_width();
+            let ch = ffi::font_cell_height();
+            let abs_r = if s.alt_screen { s.cy } else { s.sb_count + s.cy };
+            let rows_cov = ffi::sixel_decode(p.dcs_buf, s.cx, abs_r, cw, ch);
+            if rows_cov > 0 {
+                for _ in 0..rows_cov { screen::linefeed(s); }
+            }
+            p.state = ST_GROUND;
+            return;
+        }
+        if p.esc_seen {
+            p.esc_seen = false;
+            if b == '\\' {
+                let cw = ffi::font_cell_width();
+                let ch = ffi::font_cell_height();
+                let abs_r = if s.alt_screen { s.cy } else { s.sb_count + s.cy };
+                let rows_cov = ffi::sixel_decode(p.dcs_buf, s.cx, abs_r, cw, ch);
+                if rows_cov > 0 {
+                    for _ in 0..rows_cov { screen::linefeed(s); }
+                }
+                p.state = ST_GROUND;
+                return;
+            }
+        }
+        if b == 0x1B { p.esc_seen = true; return; }
+        if p.dcs_buf.len < 1048576 { p.dcs_buf.push(b); }
+        return;
+    }
+
+    if p.state == ST_APC_DATA {
+        if b == 0x07 {
+            let cw = ffi::font_cell_width();
+            let ch = ffi::font_cell_height();
+            let abs_r = if s.alt_screen { s.cy } else { s.sb_count + s.cy };
+            if p.apc_buf.len > 1 && p.apc_buf[0] == 'G' {
+                let rows_cov = ffi::kitty_graphics(p.apc_buf[1..], s.cx, abs_r, cw, ch);
+                if rows_cov > 0 {
+                    for _ in 0..rows_cov { screen::linefeed(s); }
+                }
+            }
+            p.state = ST_GROUND;
+            return;
+        }
+        if p.esc_seen {
+            p.esc_seen = false;
+            if b == '\\' {
+                let cw = ffi::font_cell_width();
+                let ch = ffi::font_cell_height();
+                let abs_r = if s.alt_screen { s.cy } else { s.sb_count + s.cy };
+                if p.apc_buf.len > 1 && p.apc_buf[0] == 'G' {
+                    let rows_cov = ffi::kitty_graphics(p.apc_buf[1..], s.cx, abs_r, cw, ch);
+                    if rows_cov > 0 {
+                        for _ in 0..rows_cov { screen::linefeed(s); }
+                    }
+                }
+                p.state = ST_GROUND;
+                return;
+            }
+        }
+        if b == 0x1B { p.esc_seen = true; return; }
+        if p.apc_buf.len < 1048576 { p.apc_buf.push(b); }
+        return;
     }
 }
 

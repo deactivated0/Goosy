@@ -30,7 +30,7 @@ for tool in pkg-config wayland-scanner; do
     fi
 done
 
-REQUIRED_LIBS="wayland-client wayland-protocols pixman-1 freetype2 fontconfig harfbuzz xkbcommon"
+REQUIRED_LIBS="wayland-client wayland-protocols pixman-1 freetype2 fontconfig harfbuzz xkbcommon libpng"
 MISSING=""
 for lib in $REQUIRED_LIBS; do
     if ! pkg-config --exists "$lib"; then
@@ -41,7 +41,7 @@ done
 if [ -n "$MISSING" ]; then
     echo "ERROR: Missing development packages:$MISSING" >&2
     echo "On Artix Linux, install with:" >&2
-    echo "  sudo pacman -S wayland wayland-protocols pixman freetype2 fontconfig harfbuzz libxkbcommon" >&2
+    echo "  sudo pacman -S wayland wayland-protocols pixman freetype2 fontconfig harfbuzz libxkbcommon libpng" >&2
     exit 1
 fi
 
@@ -50,6 +50,8 @@ WL_PROTO_DIR=$(pkg-config --variable=pkgdatadir wayland-protocols)
 XDG_XML="$WL_PROTO_DIR/stable/xdg-shell/xdg-shell.xml"
 DECO_XML="$WL_PROTO_DIR/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml"
 PRIM_XML="$WL_PROTO_DIR/unstable/primary-selection/primary-selection-unstable-v1.xml"
+FRACT_XML="$WL_PROTO_DIR/staging/fractional-scale/fractional-scale-v1.xml"
+VIEWPORT_XML="$WL_PROTO_DIR/stable/viewporter/viewporter.xml"
 
 if [ ! -f "$XDG_XML" ]; then
     echo "ERROR: Could not locate xdg-shell.xml at $XDG_XML" >&2
@@ -68,6 +70,16 @@ fi
 if [ -f "$PRIM_XML" ]; then
     wayland-scanner client-header "$PRIM_XML" native/generated/primary-selection-unstable-v1-client-protocol.h
     wayland-scanner private-code  "$PRIM_XML" native/generated/primary-selection-unstable-v1-protocol.c
+fi
+
+if [ -f "$FRACT_XML" ]; then
+    wayland-scanner client-header "$FRACT_XML" native/generated/fractional-scale-v1-client-protocol.h
+    wayland-scanner private-code  "$FRACT_XML" native/generated/fractional-scale-v1-protocol.c
+fi
+
+if [ -f "$VIEWPORT_XML" ]; then
+    wayland-scanner client-header "$VIEWPORT_XML" native/generated/viewporter-client-protocol.h
+    wayland-scanner private-code  "$VIEWPORT_XML" native/generated/viewporter-protocol.c
 fi
 
 echo "[goot] Typechecking Goose sources (goose check)..."

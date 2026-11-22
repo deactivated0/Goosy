@@ -73,10 +73,22 @@ fn draw_title_bar(s: screen::Screen&, cfg: config::Config&, focused: bool,
     let btn_w = 38 * scale;
     let btn_max_x = win_w - 3 * btn_w;
 
-    // 2. Window title text
+    // 2. Window title icon & text
+    let icon_sz = 10 * scale;
+    let icon_x = 10 * scale;
+    let icon_y = (title_h - icon_sz) / 2;
+    let icon_col: u32 = if focused { 0x4EC9B0 } else { 0x555555 };
+    // Draw terminal prompt icon '>_'
+    ffi::render_fill_rect(icon_x, icon_y + 1, 2, 2, icon_col);
+    ffi::render_fill_rect(icon_x + 2, icon_y + 3, 2, 2, icon_col);
+    ffi::render_fill_rect(icon_x + 4, icon_y + 5, 2, 2, icon_col);
+    ffi::render_fill_rect(icon_x + 2, icon_y + 7, 2, 2, icon_col);
+    ffi::render_fill_rect(icon_x, icon_y + 9, 2, 2, icon_col);
+    ffi::render_fill_rect(icon_x + 7, icon_y + 9, 5 * scale, 2, icon_col);
+
     let title_bytes: const u8[:] = if s.title.len > 0 { s.title } else { cfg.title };
     let title_fg: u32 = if focused { 0xEAEAEA } else { 0x666666 };
-    var tx = 10 * scale;
+    var tx = 28 * scale;
     let ty = if title_h > cell_h { (title_h - cell_h) / 2 } else { 0 };
 
     for i in 0..title_bytes.len {
@@ -204,9 +216,13 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
 
             let px = pad_px + col * cell_w;
             let span: i32 = if cell.width == 2 { 2 } else { 1 };
-            ffi::render_cell(px, py, cell_w, cell_h, cell.cp, fg, bg, cell.attrs as u32, span);
+            ffi::render_cell_ext(px, py, cell_w, cell_h, cell.cp, fg, bg, cell.attrs as u32, span, cell.ul_style, cell.ul_color);
         }
     }
+
+    // Render active inline images (Sixel and Kitty Graphics)
+    let view_top_abs = if s.alt_screen { 0 } else { s.sb_count - s.view_offset };
+    ffi::render_images(pad_px, title_h, view_top_abs, s.rows, s.cols, cell_w, cell_h);
 
     if m.kind == modes::MODE_URL {
         draw_url_labels(m, title_h, pad_px, s.cols, cell_w, cell_h);
