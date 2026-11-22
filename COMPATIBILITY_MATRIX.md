@@ -11,14 +11,14 @@
 | **OSC 7** | Full | Current Working Directory notification for child terminal spawning (`Ctrl+Shift+N`) |
 | **OSC 8** | Full | Hyperlink specification with clickable URLs (`Ctrl+Click`) |
 | **OSC 52** | Full | Clipboard read/write query with base64 validation |
-| **OSC 133** | Full | Semantic Shell Integration prompt marking with prompt jumping (`Ctrl+Shift+Z/X`) |
-| **Sixel Graphics** | Operational | Software decoding via internal color palette and Pixman placement |
-| **Kitty Graphics Protocol** | Operational | RGB, RGBA, and PNG software decoding with query response |
+| **OSC 133** | Full | Semantic Shell Integration prompt marking with prompt jumping (`Ctrl+Shift+Z/X`) and command output selection (`Ctrl+Shift+A`) |
+| **Sixel Graphics** | Operational | Software decoding via internal color palette and Pixman placement (4096×4096 bounded) |
+| **Kitty Graphics Protocol** | Operational | RGB, RGBA, PNG, chunked multi-packet assembly (`m=1`/`m=0`), targeted deletion by ID (`a=d, i=<id>`), query response |
 | **Wayland xdg-shell** | Full | Direct Wayland client integration with ping/pong, configure, maximize/minimize |
 | **Wayland CSD / SSD** | Full | `zxdg_decoration_manager_v1` decoration negotiation |
 | **Wayland Primary Selection** | Full | `zwp_primary_selection_device_manager_v1` copy-on-select & middle-click paste |
-| **Wayland Fractional Scale** | Full | `wp_fractional_scale_v1` & `wp_viewporter` integer & fractional scaling |
-| **Font Rasterization** | Full | FreeType 2.x, Fontconfig, and HarfBuzz OpenType shaping |
+| **Wayland Fractional Scale** | Full | `wp_fractional_scale_v1` & `wp_viewporter` with decoupled 1:1 buffer scaling |
+| **Font Rasterization** | Full | FreeType 2.x, Fontconfig, and HarfBuzz OpenType shaping with combining mark overlay |
 
 ---
 

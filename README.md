@@ -112,6 +112,7 @@ Configuration options and keybindings can be customized in `~/.config/goosy/goos
 | `Ctrl + Shift + O` | Enter URL jump picker mode |
 | `Ctrl + Shift + U` | Enter Unicode hexadecimal code point entry mode |
 | `Ctrl + Shift + Z` / `Ctrl + Shift + X` | Jump to previous / next prompt mark (OSC 133 integration) |
+| `Ctrl + Shift + A` | Select and copy entire output of last command to clipboard (OSC 133 integration) |
 
 ### Interactive Scrollback Search Mode
 | Keybinding | Action |

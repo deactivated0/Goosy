@@ -39,3 +39,8 @@
 - `2026-11-22`: Added Kitty Keyboard Protocol negotiation (`CSI ? u`, `CSI = u`, `CSI > u`, `CSI < u`) in `src/parser.goose`.
 - `2026-11-22`: Created `tests/test_security_fuzz.c` and integrated test suite runner in `scripts/test.sh`.
 - `2026-11-22`: Repaired benchmark harness (`benchmarks/comprehensive_benchmarks.py`) to eliminate hardcoded paths and support dynamic binary discovery.
+- `2026-11-22`: Implemented Kitty Graphics Protocol chunked packet assembly (`m=1`/`m=0`) and targeted deletion by ID (`a=d, i=<id>` / `a=d, d=i, i=<id>`) in `native/goot_image.c`.
+- `2026-11-22`: Enhanced Unicode combining mark support with HarfBuzz ligature shaping and zero-advance overlay fallback in `native/goot_font.c` and `native/goot_render.c`.
+- `2026-11-22`: Decoupled Wayland `wl_surface_set_buffer_scale` under `wp_viewport` to prevent compositor double-scaling on fractional scale displays.
+- `2026-11-22`: Added prompt-to-prompt command output selection (`Ctrl+Shift+A` and `select_last_command_output`) utilizing OSC 133 semantic prompt integration.
+- `2026-11-22`: Added automated regression tests in `tests/test_goot.goose` and `tests/test_security_fuzz.c` verifying chunked transfer assembly, targeted deletion, combining marks, and output selection.

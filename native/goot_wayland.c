@@ -228,9 +228,13 @@ void goot_wl_commit_damage(struct goot_shm_buffer *buf,
                            int32_t x, int32_t y, int32_t w, int32_t h,
                            bool request_frame_cb) {
     if (!g_surface || !buf || !buf->wl_buffer) return;
-    wl_surface_set_buffer_scale(g_surface, g_scale);
-    if (g_viewport && g_width > 0 && g_height > 0) {
-        wp_viewport_set_destination(g_viewport, g_width, g_height);
+    if (g_viewport) {
+        wl_surface_set_buffer_scale(g_surface, 1);
+        if (g_width > 0 && g_height > 0) {
+            wp_viewport_set_destination(g_viewport, g_width, g_height);
+        }
+    } else {
+        wl_surface_set_buffer_scale(g_surface, g_scale);
     }
     wl_surface_attach(g_surface, (struct wl_buffer *)buf->wl_buffer, 0, 0);
     if (w > 0 && h > 0) wl_surface_damage_buffer(g_surface, x, y, w, h);

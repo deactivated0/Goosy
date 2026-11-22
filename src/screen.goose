@@ -884,6 +884,43 @@ fn jump_next_prompt(s: Screen&) -> bool {
     return false;
 }
 
+// Select the output of the most recent command between previous prompt and current line
+fn select_last_command_output(s: Screen&) -> bool {
+    if s.alt_screen { return false; }
+    let top_visible = s.sb_count - s.view_offset;
+    var prompt_line: i32 = -1;
+    var line: i32 = top_visible + s.cy;
+    if history_is_prompt(s, line) {
+        line -= 1;
+    }
+    while line >= 0 {
+        if history_is_prompt(s, line) {
+            prompt_line = line;
+            break;
+        }
+        line -= 1;
+    }
+    if prompt_line < 0 { return false; }
+    let start_line: i32 = prompt_line + 1;
+    var end_line: i32 = top_visible + s.cy;
+    if history_is_prompt(s, end_line) {
+        end_line -= 1;
+    }
+    if start_line > end_line { return false; }
+
+    s.sel_active = true;
+    s.sel_mode = SEL_LINE;
+    s.sel_x0 = 0;
+    s.sel_y0 = start_line - top_visible;
+    s.sel_x1 = s.cols - 1;
+    s.sel_y1 = end_line - top_visible;
+    if s.sel_y1 < s.sel_y0 {
+        s.sel_y1 = s.sel_y0;
+    }
+    mark_all_dirty(s);
+    return true;
+}
+
 fn visible_cell(s: Screen&, col: i32, row: i32) -> Cell {
     if col < 0 || col >= s.cols || row < 0 || row >= s.rows { return blank_cell(s); }
     if s.view_offset == 0 || s.alt_screen {

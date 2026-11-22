@@ -66,7 +66,7 @@ int main(void) {
                 uint32_t cp = 0x20 + ((r + c + frame) % 95);
                 uint32_t fg = 0xFFFFFF;
                 uint32_t bg = 0x101010;
-                goot_render_cell_ext(px, py, cw, ch, cp, fg, bg, 0, 1, 0, 0);
+                goot_render_cell_ext(px, py, cw, ch, cp, 0, fg, bg, 0, 1, 0, 0);
             }
         }
         goot_render_end(false);

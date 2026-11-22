@@ -339,6 +339,31 @@ fn test_kitty_keyboard_protocol() {
     assert(scr.reply_buf[3] == '3');
 }
 
+fn test_command_output_selection_and_combining() {
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 40, 10, pal.fg, pal.bg, 20, 0);
+    var par = parser::Parser { .. };
+
+    // 1. Combining marks
+    // 'e' (U+0065) + combining acute (U+0301 = 0xCC 0x81)
+    parser::feed_slice(par, scr, pal, "e\xCC\x81");
+    let c = screen::visible_cell(scr, 0, 0);
+    assert(c.cp == 'e');
+    assert(c.combining == 0x0301);
+    assert(c.width == 1);
+
+    // 2. OSC 133 semantic prompt output selection
+    parser::feed_slice(par, scr, pal, "\r\n\x1b]133;A\x07$ ls\r\nfile1.txt\r\nfile2.txt\r\n\x1b]133;A\x07$ ");
+    let ok = screen::select_last_command_output(scr);
+    assert(ok);
+    assert(scr.sel_active);
+    assert(scr.sel_mode == screen::SEL_LINE);
+    var sel_out: u8[>..] = [];
+    screen::extract_selection(scr, sel_out);
+    assert(sel_out.len > 0);
+}
+
 fn main() {
     test_utf8_decoding();
     test_osc7_and_osc133_prompt_jumps();
@@ -350,5 +375,6 @@ fn main() {
     test_agy_escape_sequences_and_state();
     test_crlf_paste_and_resize_preservation();
     test_kitty_keyboard_protocol();
+    test_command_output_selection_and_combining();
     print("goot: all Goose unit tests passed");
 }

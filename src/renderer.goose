@@ -230,7 +230,7 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
 
             let px = pad_px + col * cell_w;
             let span: i32 = if cell.width == 2 { 2 } else { 1 };
-            ffi::render_cell_ext(px, py, cell_w, cell_h, cell.cp, fg, bg, cell.attrs, span, cell.ul_style, cell.ul_color);
+            ffi::render_cell_ext(px, py, cell_w, cell_h, cell.cp, cell.combining, fg, bg, cell.attrs, span, cell.ul_style, cell.ul_color);
         }
     }
 

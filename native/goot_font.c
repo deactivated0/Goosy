@@ -319,7 +319,12 @@ const goot_glyph_t *goot_font_shape_ligature(const uint32_t *cps, int32_t len, u
     hb_buffer_t *buf = hb_buffer_create();
     if (!buf) return NULL;
     hb_buffer_add_codepoints(buf, cps, len, 0, len);
-    hb_buffer_guess_segment_properties(buf);
+    if (goot_font_is_rtl(cps[0])) {
+        hb_buffer_set_direction(buf, HB_DIRECTION_RTL);
+        hb_buffer_set_script(buf, HB_SCRIPT_ARABIC);
+    } else {
+        hb_buffer_guess_segment_properties(buf);
+    }
     hb_shape(g_hb_reg, buf, NULL, 0);
 
     unsigned int count = 0;

@@ -347,6 +347,14 @@ fn main() {
                         let _ = screen::jump_prev_prompt(scr);
                     } else if act == input::ACT_PROMPT_NEXT {
                         let _ = screen::jump_next_prompt(scr);
+                    } else if act == input::ACT_COPY_LAST_OUTPUT {
+                        if screen::select_last_command_output(scr) {
+                            screen::extract_selection(scr, sel_out);
+                            if sel_out.len > 0 {
+                                let _ = ffi::wl_clipboard_set(sel_out);
+                                let _ = ffi::wl_primary_set(sel_out);
+                            }
+                        }
                     } else {
                         if scr.view_offset > 0 { scr.view_offset = 0; screen::mark_all_dirty(scr); }
                         input::translate_key(key_out, sym, mods, key_utf8[..ulen], scr.app_cursor);

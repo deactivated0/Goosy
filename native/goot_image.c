@@ -20,6 +20,7 @@
 
 typedef struct {
     uint32_t        id;
+    uint32_t        user_id;
     int32_t         col;
     int32_t         abs_row;
     int32_t         width_px;
@@ -31,6 +32,32 @@ typedef struct {
 static term_image_t g_images[MAX_ACTIVE_IMAGES];
 static int32_t      g_image_count = 0;
 static uint32_t     g_next_img_id = 1;
+
+#define MAX_KITTY_CHUNK_PAYLOAD (32 * 1024 * 1024)
+
+typedef struct {
+    uint32_t image_id;
+    int32_t  format;
+    int32_t  width;
+    int32_t  height;
+    int32_t  action;
+    int32_t  col;
+    int32_t  abs_row;
+    uint8_t *payload;
+    size_t   payload_len;
+    size_t   payload_cap;
+    bool     active;
+} kitty_chunk_ctx_t;
+
+static kitty_chunk_ctx_t g_kitty_chunk = {0};
+
+static void reset_kitty_chunk(void) {
+    if (g_kitty_chunk.payload) {
+        free(g_kitty_chunk.payload);
+        g_kitty_chunk.payload = NULL;
+    }
+    memset(&g_kitty_chunk, 0, sizeof(g_kitty_chunk));
+}
 
 static void free_image_slot(int32_t idx) {
     if (idx < 0 || idx >= g_image_count) return;
@@ -49,6 +76,7 @@ void goot_image_clear(void) {
         free_image_slot(i);
     }
     g_image_count = 0;
+    reset_kitty_chunk();
 }
 
 void goot_image_close(void) {
@@ -72,12 +100,27 @@ void goot_image_scroll(int32_t evicted_lines) {
     g_image_count = write_idx;
 }
 
-static int32_t add_image(int32_t col, int32_t abs_row, int32_t w, int32_t h, uint32_t *pixels, int32_t cell_h) {
+static int32_t add_image(uint32_t user_id, int32_t col, int32_t abs_row, int32_t w, int32_t h, uint32_t *pixels, int32_t cell_h) {
     if (!pixels || w <= 0 || h <= 0) return 0;
-    if (g_image_count >= MAX_ACTIVE_IMAGES) {
-        free_image_slot(0);
-        memmove(&g_images[0], &g_images[1], sizeof(term_image_t) * (MAX_ACTIVE_IMAGES - 1));
-        g_image_count = MAX_ACTIVE_IMAGES - 1;
+
+    int32_t slot = -1;
+    if (user_id > 0) {
+        for (int32_t i = 0; i < g_image_count; i++) {
+            if (g_images[i].user_id == user_id) {
+                free_image_slot(i);
+                slot = i;
+                break;
+            }
+        }
+    }
+
+    if (slot < 0) {
+        if (g_image_count >= MAX_ACTIVE_IMAGES) {
+            free_image_slot(0);
+            memmove(&g_images[0], &g_images[1], sizeof(term_image_t) * (MAX_ACTIVE_IMAGES - 1));
+            g_image_count = MAX_ACTIVE_IMAGES - 1;
+        }
+        slot = g_image_count++;
     }
 
     pixman_image_t *img = pixman_image_create_bits(
@@ -87,8 +130,8 @@ static int32_t add_image(int32_t col, int32_t abs_row, int32_t w, int32_t h, uin
         return 0;
     }
 
-    int32_t slot = g_image_count++;
     g_images[slot].id        = g_next_img_id++;
+    g_images[slot].user_id   = user_id;
     g_images[slot].col       = col;
     g_images[slot].abs_row   = abs_row;
     g_images[slot].width_px  = w;
@@ -287,7 +330,7 @@ int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row,
     free(pixels);
     pixels = tight;
 
-    return add_image(col, abs_row, max_x, max_y, pixels, cell_h);
+    return add_image(0, col, abs_row, max_x, max_y, pixels, cell_h);
 }
 
 /* -------------------------------------------------------------------------
@@ -434,13 +477,17 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
     int32_t width = 0, height = 0;
     int32_t action = 't';
     int32_t image_id = 0;
+    int32_t more_chunks = 0;
+    int32_t del_target = 0;
 
-    /* Parse control keys until ';' */
+    /* Parse control keys until ';' or end of sequence */
     int64_t semi = -1;
     for (int64_t i = 0; i < data.len; i++) {
         if (data.data[i] == ';') { semi = i; break; }
     }
-    if (semi < 0) return 0;
+    if (semi < 0) {
+        semi = data.len;
+    }
 
     int64_t p = 0;
     while (p < semi) {
@@ -460,6 +507,8 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
         else if (key == 'f') format = val;
         else if (key == 's') width = val;
         else if (key == 'v') height = val;
+        else if (key == 'm') more_chunks = val;
+        else if (key == 'd') del_target = char_val != 0 ? char_val : val;
         while (p < semi && data.data[p] == ',') p++;
     }
 
@@ -474,18 +523,107 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
     }
 
     if (action == 'd') {
-        goot_image_clear();
+        if (del_target == 'i' || (image_id > 0 && del_target != 'a')) {
+            int32_t write_idx = 0;
+            for (int32_t i = 0; i < g_image_count; i++) {
+                if (g_images[i].user_id == (uint32_t)image_id || g_images[i].id == (uint32_t)image_id) {
+                    free_image_slot(i);
+                } else {
+                    if (write_idx != i) {
+                        g_images[write_idx] = g_images[i];
+                    }
+                    write_idx++;
+                }
+            }
+            g_image_count = write_idx;
+        } else {
+            goot_image_clear();
+        }
+        return 0;
+    }
+
+    int64_t chunk_payload_len = (semi < data.len) ? (data.len - (semi + 1)) : 0;
+    const uint8_t *chunk_payload = (semi < data.len) ? (data.data + (semi + 1)) : NULL;
+
+    /* Handle multi-packet chunking: m=1 appends chunk to buffer */
+    if (more_chunks == 1) {
+        if (!g_kitty_chunk.active) {
+            reset_kitty_chunk();
+            g_kitty_chunk.active = true;
+            g_kitty_chunk.image_id = (uint32_t)image_id;
+            g_kitty_chunk.format = format;
+            g_kitty_chunk.width = width;
+            g_kitty_chunk.height = height;
+            g_kitty_chunk.action = action;
+            g_kitty_chunk.col = col;
+            g_kitty_chunk.abs_row = abs_row;
+        }
+        if (chunk_payload && chunk_payload_len > 0) {
+            size_t new_len = g_kitty_chunk.payload_len + (size_t)chunk_payload_len;
+            if (new_len <= MAX_KITTY_CHUNK_PAYLOAD) {
+                if (new_len > g_kitty_chunk.payload_cap) {
+                    size_t new_cap = g_kitty_chunk.payload_cap == 0 ? 65536 : g_kitty_chunk.payload_cap * 2;
+                    while (new_cap < new_len) new_cap *= 2;
+                    uint8_t *new_p = (uint8_t *)realloc(g_kitty_chunk.payload, new_cap);
+                    if (new_p) {
+                        g_kitty_chunk.payload = new_p;
+                        g_kitty_chunk.payload_cap = new_cap;
+                    }
+                }
+                if (g_kitty_chunk.payload && g_kitty_chunk.payload_cap >= new_len) {
+                    memcpy(g_kitty_chunk.payload + g_kitty_chunk.payload_len, chunk_payload, (size_t)chunk_payload_len);
+                    g_kitty_chunk.payload_len = new_len;
+                }
+            }
+        }
+        return 0; /* Await next chunk */
+    }
+
+    /* more_chunks == 0: either final chunk of a sequence or single-packet transfer */
+    const uint8_t *final_payload = chunk_payload;
+    int64_t final_payload_len = chunk_payload_len;
+
+    if (g_kitty_chunk.active) {
+        if (chunk_payload && chunk_payload_len > 0) {
+            size_t new_len = g_kitty_chunk.payload_len + (size_t)chunk_payload_len;
+            if (new_len <= MAX_KITTY_CHUNK_PAYLOAD) {
+                if (new_len > g_kitty_chunk.payload_cap) {
+                    uint8_t *new_p = (uint8_t *)realloc(g_kitty_chunk.payload, new_len + 1);
+                    if (new_p) {
+                        g_kitty_chunk.payload = new_p;
+                        g_kitty_chunk.payload_cap = new_len + 1;
+                    }
+                }
+                if (g_kitty_chunk.payload && g_kitty_chunk.payload_cap >= new_len) {
+                    memcpy(g_kitty_chunk.payload + g_kitty_chunk.payload_len, chunk_payload, (size_t)chunk_payload_len);
+                    g_kitty_chunk.payload_len = new_len;
+                }
+            }
+        }
+        final_payload = g_kitty_chunk.payload;
+        final_payload_len = (int64_t)g_kitty_chunk.payload_len;
+        if (format == 32 && g_kitty_chunk.format != 32) format = g_kitty_chunk.format;
+        if (width == 0) width = g_kitty_chunk.width;
+        if (height == 0) height = g_kitty_chunk.height;
+        if (image_id == 0) image_id = (int32_t)g_kitty_chunk.image_id;
+        col = g_kitty_chunk.col;
+        abs_row = g_kitty_chunk.abs_row;
+    }
+
+    if (!final_payload || final_payload_len <= 0) {
+        reset_kitty_chunk();
         return 0;
     }
 
     if (width > MAX_IMAGE_W || height > MAX_IMAGE_H ||
         (width > 0 && height > 0 && (uint64_t)width * (uint64_t)height > MAX_IMAGE_PIXELS)) {
+        reset_kitty_chunk();
         return 0;
     }
 
-    int64_t payload_len = data.len - (semi + 1);
     int64_t dec_len = 0;
-    uint8_t *decoded = base64_decode(data.data + (semi + 1), payload_len, &dec_len);
+    uint8_t *decoded = base64_decode(final_payload, final_payload_len, &dec_len);
+    reset_kitty_chunk();
     if (!decoded || dec_len <= 0) return 0;
 
     uint32_t *pixels = NULL;
@@ -522,5 +660,5 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
     free(decoded);
     if (!pixels || w <= 0 || h <= 0) return 0;
 
-    return add_image(col, abs_row, w, h, pixels, cell_h);
+    return add_image((uint32_t)image_id, col, abs_row, w, h, pixels, cell_h);
 }

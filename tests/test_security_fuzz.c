@@ -73,11 +73,44 @@ static void test_pty_dynamic_write_burst(void) {
     printf("[security] Large PTY write burst test passed\n");
 }
 
+static void test_kitty_chunking_and_targeted_deletion(void) {
+    printf("[security] 5. Testing Kitty graphics chunked assembly & targeted deletion...\n");
+    goot_image_clear();
+
+    // 2x2 RGBA image: 4 pixels of solid red (0xFF0000FF in RGBA = R=255, G=0, B=0, A=255)
+    // 16 bytes: FF 00 00 FF  FF 00 00 FF  FF 00 00 FF  FF 00 00 FF
+    // Base64 encoding of 16 bytes: "/wAA//8AAP//AAD//wAA"
+    // Split into 2 chunks:
+    // Chunk 1: "a=T,f=32,s=2,v=2,i=42,m=1;/wAA//8AAP//"
+    // Chunk 2: "m=0,i=42;AAD//wAA"
+
+    const char *chunk1 = "a=T,f=32,s=2,v=2,i=42,m=1;/wAA//8AAP//";
+    goot_const_bytes_t d1 = { (const uint8_t *)chunk1, (int64_t)strlen(chunk1) };
+    int32_t rows1 = goot_kitty_graphics(d1, 0, 0, 8, 16);
+    assert(rows1 == 0); // Must return 0 because m=1 (more chunks follow)
+
+    const char *chunk2 = "m=0,i=42;AAD//wAA";
+    goot_const_bytes_t d2 = { (const uint8_t *)chunk2, (int64_t)strlen(chunk2) };
+    int32_t rows2 = goot_kitty_graphics(d2, 0, 0, 8, 16);
+    assert(rows2 >= 1); // Must successfully assemble and decode 2x2 image
+    printf("[security] Chunked transfer successfully assembled (rows=%d)\n", (int)rows2);
+
+    // Targeted deletion by image_id (i=42)
+    const char *del_cmd = "a=d,d=i,i=42;";
+    goot_const_bytes_t d_del = { (const uint8_t *)del_cmd, (int64_t)strlen(del_cmd) };
+    int32_t del_res = goot_kitty_graphics(d_del, 0, 0, 8, 16);
+    assert(del_res == 0);
+    printf("[security] Targeted deletion of image ID 42 passed\n");
+
+    goot_image_clear();
+}
+
 int main(void) {
     test_sixel_overflow_rejection();
     test_kitty_bounds_rejection();
     test_png_bounds_rejection();
     test_pty_dynamic_write_burst();
+    test_kitty_chunking_and_targeted_deletion();
     printf("\nALL SECURITY & RESOURCE BOUNDARY REGRESSION TESTS PASSED.\n");
     return 0;
 }

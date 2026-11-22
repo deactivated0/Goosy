@@ -200,7 +200,7 @@ void    goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
                          uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
                          uint32_t attr_flags, int32_t span_cols);
 void    goot_render_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
-                             uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
+                             uint32_t codepoint, uint32_t combining, uint32_t fg_rgb, uint32_t bg_rgb,
                              uint32_t attr_flags, int32_t span_cols,
                              uint8_t ul_style, uint32_t ul_color);
 void    goot_render_cursor(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,

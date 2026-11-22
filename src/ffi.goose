@@ -110,7 +110,7 @@ extern fn render_cell(px: i32, py: i32, cell_w: i32, cell_h: i32,
                       codepoint: u32, fg_rgb: u32, bg_rgb: u32,
                       attr_flags: u32, span_cols: i32) = "goot_render_cell";
 extern fn render_cell_ext(px: i32, py: i32, cell_w: i32, cell_h: i32,
-                          codepoint: u32, fg_rgb: u32, bg_rgb: u32,
+                          codepoint: u32, combining: u32, fg_rgb: u32, bg_rgb: u32,
                           attr_flags: u32, span_cols: i32,
                           ul_style: u8, ul_color: u32) = "goot_render_cell_ext";
 extern fn render_cursor(px: i32, py: i32, cell_w: i32, cell_h: i32,

@@ -356,7 +356,7 @@ static bool render_procedural_glyph(int32_t px, int32_t py, int32_t w, int32_t h
 }
 
 void goot_render_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
-                          uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
+                          uint32_t codepoint, uint32_t combining, uint32_t fg_rgb, uint32_t bg_rgb,
                           uint32_t attr_flags, int32_t span_cols,
                           uint8_t ul_style, uint32_t ul_color) {
     if (!g_cur_pixels || cell_w <= 0 || cell_h <= 0) return;
@@ -371,47 +371,73 @@ void goot_render_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h
         /* handled procedurally with pixel precision */
     } else if (codepoint > 0x20U) {
         uint8_t style = (uint8_t)(attr_flags & 0x03U); /* bit0=bold, bit1=italic */
-        const goot_glyph_t *g = goot_font_get_glyph(codepoint, style);
-        if (g && g->bitmap && g->width > 0 && g->height > 0) {
-            int32_t gx = px + g->bearing_x;
-            int32_t gy = py + goot_font_baseline() - g->bearing_y;
-            if (g->is_color) {
-                pixman_image_t *dst_img = get_cur_pixman_img();
-                if (dst_img) {
-                    pixman_image_t *src = pixman_image_create_bits(
-                        PIXMAN_a8r8g8b8, g->width, g->height,
-                        (uint32_t *)g->bitmap, g->stride);
-                    if (src) {
-                        if (g->width > total_w || g->height > cell_h) {
-                            pixman_f_transform_t ft;
-                            pixman_f_transform_init_identity(&ft);
-                            double sx = (double)g->width / (double)total_w;
-                            double sy = (double)g->height / (double)cell_h;
-                            double sc = (sx > sy) ? sx : sy;
-                            pixman_f_transform_scale(&ft, NULL, sc, sc);
-                            pixman_transform_t t;
-                            pixman_transform_from_pixman_f_transform(&t, &ft);
-                            pixman_image_set_transform(src, &t);
-                            pixman_image_set_filter(src, PIXMAN_FILTER_BILINEAR, NULL, 0);
-                            int32_t dw = (int32_t)(g->width / sc);
-                            int32_t dh = (int32_t)(g->height / sc);
-                            int32_t ox = px + (total_w - dw) / 2;
-                            int32_t oy = py + (cell_h - dh) / 2;
-                            pixman_image_composite32(PIXMAN_OP_OVER, src, NULL, dst_img,
-                                                     0, 0, 0, 0, ox, oy, dw, dh);
-                            goot_render_damage(ox, oy, dw, dh);
-                        } else {
-                            int32_t ox = px + (total_w - g->width) / 2;
-                            int32_t oy = py + (cell_h - g->height) / 2;
-                            pixman_image_composite32(PIXMAN_OP_OVER, src, NULL, dst_img,
-                                                     0, 0, 0, 0, ox, oy, (uint32_t)g->width, (uint32_t)g->height);
-                            goot_render_damage(ox, oy, g->width, g->height);
+        bool shaped = false;
+
+        /* Try HarfBuzz ligature/combining mark shaping */
+        if (combining != 0) {
+            uint32_t cps[2] = { codepoint, combining };
+            const goot_glyph_t *sh = goot_font_shape_ligature(cps, 2, style);
+            if (sh && sh->bitmap && sh->width > 0 && sh->height > 0) {
+                int32_t gx = px + sh->bearing_x;
+                int32_t gy = py + goot_font_baseline() - sh->bearing_y;
+                blend_glyph_a8(gx, gy, sh, fg_rgb);
+                shaped = true;
+            }
+        }
+
+        if (!shaped) {
+            const goot_glyph_t *g = goot_font_get_glyph(codepoint, style);
+            if (g && g->bitmap && g->width > 0 && g->height > 0) {
+                int32_t gx = px + g->bearing_x;
+                int32_t gy = py + goot_font_baseline() - g->bearing_y;
+                if (g->is_color) {
+                    pixman_image_t *dst_img = get_cur_pixman_img();
+                    if (dst_img) {
+                        pixman_image_t *src = pixman_image_create_bits(
+                            PIXMAN_a8r8g8b8, g->width, g->height,
+                            (uint32_t *)g->bitmap, g->stride);
+                        if (src) {
+                            if (g->width > total_w || g->height > cell_h) {
+                                pixman_f_transform_t ft;
+                                pixman_f_transform_init_identity(&ft);
+                                double sx = (double)g->width / (double)total_w;
+                                double sy = (double)g->height / (double)cell_h;
+                                double sc = (sx > sy) ? sx : sy;
+                                pixman_f_transform_scale(&ft, NULL, sc, sc);
+                                pixman_transform_t t;
+                                pixman_transform_from_pixman_f_transform(&t, &ft);
+                                pixman_image_set_transform(src, &t);
+                                pixman_image_set_filter(src, PIXMAN_FILTER_BILINEAR, NULL, 0);
+                                int32_t dw = (int32_t)(g->width / sc);
+                                int32_t dh = (int32_t)(g->height / sc);
+                                int32_t ox = px + (total_w - dw) / 2;
+                                int32_t oy = py + (cell_h - dh) / 2;
+                                pixman_image_composite32(PIXMAN_OP_OVER, src, NULL, dst_img,
+                                                         0, 0, 0, 0, ox, oy, dw, dh);
+                                goot_render_damage(ox, oy, dw, dh);
+                            } else {
+                                int32_t ox = px + (total_w - g->width) / 2;
+                                int32_t oy = py + (cell_h - g->height) / 2;
+                                pixman_image_composite32(PIXMAN_OP_OVER, src, NULL, dst_img,
+                                                         0, 0, 0, 0, ox, oy, (uint32_t)g->width, (uint32_t)g->height);
+                                goot_render_damage(ox, oy, g->width, g->height);
+                            }
+                            pixman_image_unref(src);
                         }
-                        pixman_image_unref(src);
                     }
+                } else {
+                    blend_glyph_a8(gx, gy, g, fg_rgb);
                 }
-            } else {
-                blend_glyph_a8(gx, gy, g, fg_rgb);
+            }
+
+            /* Overlay combining mark glyph if not shaped into a single ligature */
+            if (combining != 0) {
+                const goot_glyph_t *cg = goot_font_get_glyph(combining, style);
+                if (cg && cg->bitmap && cg->width > 0 && cg->height > 0) {
+                    int32_t cx = px + (total_w - cg->width) / 2;
+                    int32_t cy = py + goot_font_baseline() - cg->bearing_y;
+                    blend_glyph_a8(cx, cy, cg, fg_rgb);
+                }
             }
         }
     }
@@ -460,7 +486,7 @@ void goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
                       uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
                       uint32_t attr_flags, int32_t span_cols) {
     uint8_t ul_style = (attr_flags & (1U << 2)) ? 1 : 0;
-    goot_render_cell_ext(px, py, cell_w, cell_h, codepoint, fg_rgb, bg_rgb,
+    goot_render_cell_ext(px, py, cell_w, cell_h, codepoint, 0, fg_rgb, bg_rgb,
                          attr_flags, span_cols, ul_style, 0);
 }
 

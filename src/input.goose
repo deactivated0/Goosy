@@ -51,6 +51,7 @@ let ACT_URL_MODE: i32       = 11;
 let ACT_UNICODE_MODE: i32   = 12;
 let ACT_PROMPT_PREV: i32    = 13;
 let ACT_PROMPT_NEXT: i32    = 14;
+let ACT_COPY_LAST_OUTPUT: i32 = 15;
 
 // Default Normal-mode shortcuts matching Foot/goot.ini
 fn check_shortcut(keysym: i32, mods: i32) -> i32 {
@@ -70,6 +71,7 @@ fn check_shortcut(keysym: i32, mods: i32) -> i32 {
         if keysym == 'U' || keysym == 'u' { return ACT_UNICODE_MODE; }
         if keysym == 'Z' || keysym == 'z' { return ACT_PROMPT_PREV; }
         if keysym == 'X' || keysym == 'x' { return ACT_PROMPT_NEXT; }
+        if keysym == 'A' || keysym == 'a' { return ACT_COPY_LAST_OUTPUT; }
         if keysym == '+' || keysym == '=' { return ACT_FONT_INC; }
     }
     if ctrl && !alt {
