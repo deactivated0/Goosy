@@ -206,6 +206,7 @@ void    goot_render_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cel
 void    goot_render_cursor(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
                            uint32_t color_rgb, int32_t style);
 void    goot_render_damage(int32_t x, int32_t y, int32_t w, int32_t h);
+int32_t goot_render_title_icon(int32_t x, int32_t y, int32_t size_px);
 void    goot_render_images(int32_t pad_px, int32_t title_h, int32_t view_top_abs_row,
                            int32_t rows, int32_t cols, int32_t cell_w, int32_t cell_h);
 void    goot_render_end(bool request_frame_cb);

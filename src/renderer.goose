@@ -74,25 +74,35 @@ fn draw_title_bar(s: screen::Screen&, cfg: config::Config&, focused: bool,
     let btn_max_x = win_w - 3 * btn_w;
 
     // 2. Window title icon & text
-    let icon_sz = 10 * scale;
+    let icon_sz = 16 * scale;
     let icon_x = 10 * scale;
-    let icon_y = (title_h - icon_sz) / 2;
-    let icon_col: u32 = if focused { 0x4EC9B0 } else { 0x555555 };
-    // Draw terminal prompt icon '>_'
-    ffi::render_fill_rect(icon_x, icon_y + 1, 2, 2, icon_col);
-    ffi::render_fill_rect(icon_x + 2, icon_y + 3, 2, 2, icon_col);
-    ffi::render_fill_rect(icon_x + 4, icon_y + 5, 2, 2, icon_col);
-    ffi::render_fill_rect(icon_x + 2, icon_y + 7, 2, 2, icon_col);
-    ffi::render_fill_rect(icon_x, icon_y + 9, 2, 2, icon_col);
-    ffi::render_fill_rect(icon_x + 7, icon_y + 9, 5 * scale, 2, icon_col);
+    let icon_y = if title_h > icon_sz { (title_h - icon_sz) / 2 } else { 0 };
+
+    if ffi::render_title_icon(icon_x, icon_y, icon_sz) == 0 {
+        // Fallback: draw terminal prompt icon '>_'
+        let icon_col: u32 = if focused { 0x4EC9B0 } else { 0x555555 };
+        ffi::render_fill_rect(icon_x, icon_y + 1, 2, 2, icon_col);
+        ffi::render_fill_rect(icon_x + 2, icon_y + 3, 2, 2, icon_col);
+        ffi::render_fill_rect(icon_x + 4, icon_y + 5, 2, 2, icon_col);
+        ffi::render_fill_rect(icon_x + 2, icon_y + 7, 2, 2, icon_col);
+        ffi::render_fill_rect(icon_x, icon_y + 9, 2, 2, icon_col);
+        ffi::render_fill_rect(icon_x + 7, icon_y + 9, 5 * scale, 2, icon_col);
+    }
 
     let title_bytes: const u8[:] = if s.title.len > 0 { s.title } else { cfg.title };
     let title_fg: u32 = if focused { 0xEAEAEA } else { 0x666666 };
-    var tx = 28 * scale;
     let ty = if title_h > cell_h { (title_h - cell_h) / 2 } else { 0 };
 
+    // Center title text in the middle of the title bar
+    let title_len = title_bytes.len as! i32;
+    let total_title_w = title_len * cell_w;
+    var tx = (win_w - total_title_w) / 2;
+    let min_tx = icon_x + icon_sz + 8 * scale;
+    let max_tx = btn_max_x - 8 * scale;
+    if tx < min_tx { tx = min_tx; }
+
     for i in 0..title_bytes.len {
-        if tx + cell_w >= btn_max_x - 8 * scale { break; }
+        if tx + cell_w >= max_tx { break; }
         ffi::render_cell(tx, ty, cell_w, cell_h, title_bytes[i] as u32, title_fg, bar_bg, 0, 1);
         tx += cell_w;
     }

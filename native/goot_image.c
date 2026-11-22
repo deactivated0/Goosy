@@ -330,7 +330,7 @@ static void png_mem_reader(png_structp png_ptr, png_bytep out_bytes, png_size_t 
     s->off += count;
 }
 
-static uint32_t *decode_png_to_argb(const uint8_t *data, size_t len, int32_t *out_w, int32_t *out_h) {
+uint32_t *goot_decode_png_to_argb(const uint8_t *data, size_t len, int32_t *out_w, int32_t *out_h) {
     if (!data || len < 8 || png_sig_cmp((png_const_bytep)data, 0, 8) != 0) return NULL;
 
     png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -466,7 +466,7 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
 
     if (format == 100) {
         /* PNG format */
-        pixels = decode_png_to_argb(decoded, (size_t)dec_len, &w, &h);
+        pixels = goot_decode_png_to_argb(decoded, (size_t)dec_len, &w, &h);
     } else if (format == 32 && w > 0 && h > 0) {
         /* Raw RGBA */
         pixels = (uint32_t *)malloc((size_t)w * (size_t)h * sizeof(uint32_t));

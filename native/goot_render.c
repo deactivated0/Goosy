@@ -10,6 +10,8 @@
 #include "goot_image.h"
 
 #include <pixman.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static struct goot_shm_buffer *g_cur_buf = NULL;
@@ -389,6 +391,84 @@ void goot_render_cursor(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
     } else {
         goot_render_fill_rect(px, py, cell_w, cell_h, color_rgb);
     }
+}
+
+static pixman_image_t *g_title_icon = NULL;
+static int32_t         g_title_icon_w = 0;
+static int32_t         g_title_icon_h = 0;
+static bool            g_title_icon_attempted = false;
+
+static void load_title_icon_once(void) {
+    if (g_title_icon_attempted) return;
+    g_title_icon_attempted = true;
+
+    const char *candidates[] = {
+        "/home/pc/Desktop/goot.png",
+        "/home/pc/.local/share/pixmaps/goosy.png",
+        "/home/pc/builds/goot/assets/goosy.png",
+        "/home/pc/builds/goot/assets/goot.png",
+        NULL
+    };
+
+    for (int i = 0; candidates[i] != NULL; i++) {
+        FILE *f = fopen(candidates[i], "rb");
+        if (!f) continue;
+        if (fseek(f, 0, SEEK_END) != 0) { fclose(f); continue; }
+        long sz = ftell(f);
+        if (fseek(f, 0, SEEK_SET) != 0 || sz <= 0 || sz > 16 * 1024 * 1024) {
+            fclose(f);
+            continue;
+        }
+        uint8_t *data = (uint8_t *)malloc((size_t)sz);
+        if (!data) {
+            fclose(f);
+            continue;
+        }
+        if (fread(data, 1, (size_t)sz, f) != (size_t)sz) {
+            free(data);
+            fclose(f);
+            continue;
+        }
+        fclose(f);
+
+        int32_t w = 0, h = 0;
+        uint32_t *pixels = goot_decode_png_to_argb(data, (size_t)sz, &w, &h);
+        free(data);
+        if (pixels && w > 0 && h > 0) {
+            g_title_icon = pixman_image_create_bits(
+                PIXMAN_a8r8g8b8, w, h, pixels, w * (int32_t)sizeof(uint32_t));
+            if (g_title_icon) {
+                g_title_icon_w = w;
+                g_title_icon_h = h;
+                break;
+            } else {
+                free(pixels);
+            }
+        }
+    }
+}
+
+int32_t goot_render_title_icon(int32_t x, int32_t y, int32_t size_px) {
+    if (!g_cur_img || size_px <= 0) return 0;
+    load_title_icon_once();
+    if (!g_title_icon || g_title_icon_w <= 0 || g_title_icon_h <= 0) return 0;
+
+    pixman_f_transform_t ft;
+    pixman_f_transform_init_identity(&ft);
+    double sx = (double)g_title_icon_w / (double)size_px;
+    double sy = (double)g_title_icon_h / (double)size_px;
+    pixman_f_transform_scale(&ft, NULL, sx, sy);
+    pixman_transform_t t;
+    pixman_transform_from_pixman_f_transform(&t, &ft);
+    pixman_image_set_transform(g_title_icon, &t);
+    pixman_image_set_filter(g_title_icon, PIXMAN_FILTER_BILINEAR, NULL, 0);
+
+    pixman_image_composite32(
+        PIXMAN_OP_OVER, g_title_icon, NULL, g_cur_img,
+        0, 0, 0, 0, x, y, (uint32_t)size_px, (uint32_t)size_px);
+
+    goot_render_damage(x, y, size_px, size_px);
+    return 1;
 }
 
 void goot_render_images(int32_t pad_px, int32_t title_h, int32_t view_top_abs_row,

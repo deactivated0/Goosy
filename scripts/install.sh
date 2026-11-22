@@ -19,6 +19,13 @@ mkdir -p "$BIN_DIR" "$APP_DIR" "$MAN_DIR" "$CFG_DIR"
 install -m 755 "$ROOT_DIR/build/goosy" "$BIN_DIR/goosy"
 ln -sf goosy "$BIN_DIR/goot"
 
+if command -v sudo >/dev/null 2>&1; then
+    sudo ln -sf "$BIN_DIR/goosy" /usr/local/bin/goosy 2>/dev/null || true
+    sudo ln -sf "$BIN_DIR/goot" /usr/local/bin/goot 2>/dev/null || true
+    sudo ln -sf "$BIN_DIR/goosy" /usr/bin/goosy 2>/dev/null || true
+    sudo ln -sf "$BIN_DIR/goot" /usr/bin/goot 2>/dev/null || true
+fi
+
 if [ -f "$ROOT_DIR/doc/goosy.ini.5" ]; then
     install -m 644 "$ROOT_DIR/doc/goosy.ini.5" "$MAN_DIR/goosy.ini.5"
     ln -sf goosy.ini.5 "$MAN_DIR/goot.ini.5"

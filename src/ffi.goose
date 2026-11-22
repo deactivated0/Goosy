@@ -115,6 +115,7 @@ extern fn render_cell_ext(px: i32, py: i32, cell_w: i32, cell_h: i32,
                           ul_style: u8, ul_color: u32) = "goot_render_cell_ext";
 extern fn render_cursor(px: i32, py: i32, cell_w: i32, cell_h: i32,
                         color_rgb: u32, style: i32) = "goot_render_cursor";
+extern fn render_title_icon(x: i32, y: i32, size_px: i32) -> i32 = "goot_render_title_icon";
 extern fn render_damage(x: i32, y: i32, w: i32, h: i32) = "goot_render_damage";
 extern fn render_images(pad_px: i32, title_h: i32, view_top_abs_row: i32,
                         rows: i32, cols: i32, cell_w: i32, cell_h: i32) = "goot_render_images";
