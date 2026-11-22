@@ -63,8 +63,8 @@ fn draw_url_labels(m: modes::ModeState&, top_y: i32, pad_px: i32, cols: i32, cel
 fn draw_title_bar(s: screen::Screen&, cfg: config::Config&, focused: bool,
                   hover_btn: i32, pressed_btn: i32, scale: i32,
                   win_w: i32, title_h: i32, cell_w: i32, cell_h: i32) {
-    let bar_bg: u32 = if focused { 0x141414 } else { 0x0E0E0E };
-    let border_col: u32 = 0x262626;
+    let bar_bg: u32 = 0x000000;
+    let border_col: u32 = 0x1A1A1A;
 
     // 1. Title bar background and bottom subtle border
     ffi::render_fill_rect(0, 0, win_w, title_h, bar_bg);
@@ -75,7 +75,7 @@ fn draw_title_bar(s: screen::Screen&, cfg: config::Config&, focused: bool,
 
     // 2. Window title text
     let title_bytes: const u8[:] = if s.title.len > 0 { s.title } else { cfg.title };
-    let title_fg: u32 = if focused { 0xD0D0D0 } else { 0x777777 };
+    let title_fg: u32 = if focused { 0xEAEAEA } else { 0x666666 };
     var tx = 10 * scale;
     let ty = if title_h > cell_h { (title_h - cell_h) / 2 } else { 0 };
 
@@ -88,11 +88,11 @@ fn draw_title_bar(s: screen::Screen&, cfg: config::Config&, focused: bool,
     // 3. Minimize button
     let min_x = win_w - 3 * btn_w;
     if hover_btn == BTN_MIN {
-        let min_bg: u32 = if pressed_btn == BTN_MIN { 0x333333 } else { 0x262626 };
+        let min_bg: u32 = if pressed_btn == BTN_MIN { 0x282828 } else { 0x1A1A1A };
         ffi::render_fill_rect(min_x, 0, btn_w, title_h - 1, min_bg);
     }
     let icon_w = 10 * scale;
-    let icon_fg: u32 = if focused { 0xEAEAEA } else { 0x888888 };
+    let icon_fg: u32 = if focused { 0xEAEAEA } else { 0x777777 };
     let min_ix = min_x + (btn_w - icon_w) / 2;
     let min_iy = title_h / 2 + 2 * scale;
     ffi::render_fill_rect(min_ix, min_iy, icon_w, if scale > 1 { 2 } else { 1 }, icon_fg);
@@ -100,7 +100,7 @@ fn draw_title_bar(s: screen::Screen&, cfg: config::Config&, focused: bool,
     // 4. Maximize / Restore button
     let max_x = win_w - 2 * btn_w;
     if hover_btn == BTN_MAX {
-        let max_bg: u32 = if pressed_btn == BTN_MAX { 0x333333 } else { 0x262626 };
+        let max_bg: u32 = if pressed_btn == BTN_MAX { 0x282828 } else { 0x1A1A1A };
         ffi::render_fill_rect(max_x, 0, btn_w, title_h - 1, max_bg);
     }
     let max_sz = 10 * scale;

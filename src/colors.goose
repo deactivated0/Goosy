@@ -3,14 +3,14 @@
 
 namespace colors;
 
-let DEFAULT_BG: u32           = 0x080808;
+let DEFAULT_BG: u32           = 0x000000;
 let DEFAULT_FG: u32           = 0xEAEAEA;
 let DEFAULT_CURSOR: u32       = 0xEAEAEA;
 let DEFAULT_SELECTION_BG: u32 = 0x2A3F5F;
 let DEFAULT_SELECTION_FG: u32 = 0xFFFFFF;
 
 struct Palette {
-    bg: u32 = 0x080808,
+    bg: u32 = 0x000000,
     fg: u32 = 0xEAEAEA,
     cursor: u32 = 0xEAEAEA,
     selection_bg: u32 = 0x2A3F5F,

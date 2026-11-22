@@ -30,7 +30,7 @@ struct Cell {
     cp: u32 = 0x20,
     combining: u32 = 0,
     fg: u32 = 0xEAEAEA,
-    bg: u32 = 0x080808,
+    bg: u32 = 0x000000,
     attrs: u16 = 0,
     width: u8 = 1,
     flags: u8 = 0,
@@ -51,10 +51,10 @@ root struct Screen {
     scroll_bottom: i32 = 23,
 
     cur_fg: u32 = 0xEAEAEA,
-    cur_bg: u32 = 0x080808,
+    cur_bg: u32 = 0x000000,
     cur_attrs: u16 = 0,
     default_fg: u32 = 0xEAEAEA,
-    default_bg: u32 = 0x080808,
+    default_bg: u32 = 0x000000,
 
     alt_screen: bool = false,
     cursor_visible: bool = true,
