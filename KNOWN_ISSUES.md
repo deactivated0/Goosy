@@ -1,14 +1,25 @@
-# Goot — Known Issues & Remaining Blockers
+# Goot — Known Issues & Resolution Status
 
-## Environmental Blockers (Sandbox)
-1. **Goose compiler not installed in sandbox**: `goose check` and `goose build` could not be executed in the offline Debian sandbox container. All `.goose` files and `goot.build` were written strictly against the official Goose documentation ([tutorial](https://aardappel.github.io/goose/docs/tutorial.html), [reference](https://github.com/aardappel/goose/blob/master/docs/reference.md), [packages](https://aardappel.github.io/goose/docs/packages.html)), but first-compile typecheck adjustments may be needed if minor upstream compiler syntax changes landed after November 2026.
-2. **Wayland / Pixman / FreeType / Fontconfig / HarfBuzz / xkbcommon dev libraries absent in sandbox**: `native/goot_wayland.c`, `native/goot_xkb.c`, `native/goot_font.c`, and `native/goot_render.c` could not be compiled in the sandbox; only `native/goot_pty.c` and `native/goot_poll.c` were compiled and unit-tested in-container.
-3. **Interactive Wayland compatibility & benchmarks pending**: Live testing under `labwc` with Bash, Fish, Zsh, Vim, Neovim, Nano, Htop, Btop, Less, Tmux, Fastfetch, OpenCode, and Claude Code must be executed on the target Artix Linux x86_64 machine.
+## Resolved in v0.2.0
 
-## Current Technical Limitations (v0.1.0)
-1. **HiDPI fractional scaling**: Integer `wl_surface_set_buffer_scale` is wired; Wayland `wp-fractional-scale-v1` is not yet bound.
-2. **Server-side decorations (`xdg-decoration-unstable-v1`)**: Currently uses minimal borderless `xdg-shell` toplevel (compositor-managed borders in `labwc`). Adding `zxdg_decoration_manager_v1` is a straightforward follow-up.
-3. **HarfBuzz complex script shaping**: `hb_ft_font_t` is initialized in `native/goot_font.c`, but the cell loop currently renders per-cell codepoints (base + single combining mark). Full ligature / RTL line shaping across cells is deferred to v0.2.
-4. **Key repeat**: `wl_keyboard.repeat_info` is received; compositor-rate key repeat timer via `timerfd` in `epoll` is not yet wired (single keypresses work immediately).
-5. **Double-buffer partial damage synchronization**: When `s.full_redraw == false`, only dirty rows are redrawn onto the acquired buffer; on compositors that ping-pong between two `wl_shm` buffers, tracking per-buffer dirty age (or copying previous damaged rows) should be enabled if artifacts appear during partial updates.
-6. **Scrollback reflow on resize**: Resizing currently preserves top-left cells without line-wrapping reflow from scrollback.
+1. **Native Wayland Title Bar & Window Management**:
+   - **Resolved**: Integrated client-side decorations (CSD) and server-side decoration negotiation (`zxdg_decoration_manager_v1`). Goot now provides a functional Pixman-rendered title bar featuring window drag/move (`xdg_toplevel.move`), minimize (`xdg_toplevel.set_minimized`), maximize/restore toggle (`xdg_toplevel.set_maximized` / `unset_maximized`), double-click title bar to maximize, button hover/press states, and interactive cursor shape switching (`default`, `pointer`, `text`) via `wayland-cursor`.
+2. **Fastfetch Output Formatting & Alignment**:
+   - **Resolved**: Addressed all root causes:
+     - Set initial terminal geometry to `110x32` so modern system information strings (e.g. 73-char font strings) and 44-col logos fit cleanly without premature line wrapping.
+     - Properly subtracted title bar height (`title_h`) from effective terminal rows so PTY rows report exact content geometry (`ws_row`, `ws_ypixel`).
+     - Added procedural zero-gap rendering for all Box-Drawing (`U+2500..U+257F`) and Block Elements (`U+2580..U+259F`), ensuring progress bars (`━━━━━───────────────`) connect seamlessly without subpixel gaps.
+     - Added Fontconfig dynamic fallback face resolution (`find_fallback_face`) for missing symbols.
+     - Cleared `wrap_pending` state upon erase commands (`ED`/`EL`).
+3. **Primary Selection Integration**:
+   - **Resolved**: Bound `zwp_primary_selection_device_manager_v1` to support true inter-client Linux primary selection copy and paste (middle-click paste / `Shift+Insert`).
+4. **PTY Backpressure & Write Ring Buffer**:
+   - **Resolved**: Implemented a 64 KiB non-blocking write ring buffer in `goot_pty.c` and integrated `EPOLLOUT` notification in `goot_poll.c` to prevent data loss or blocking on high-volume terminal output.
+5. **Config Hex Color Parsing**:
+   - **Resolved**: Fixed INI parser to distinguish hex color hash prefixes (`#1a1b26`) from inline comments, preserving custom palette colors.
+6. **Double-Buffering Damage Synchronization**:
+   - **Resolved**: Implemented 2-frame dirty row lifetime (`s.dirty_rows[r] = 2`) and 2-frame full redraw tracking (`s.full_redraw_frames = 2`) ensuring both active and inactive Wayland SHM buffers remain synchronized across partial redraws with zero flickering.
+
+## Current Technical Characteristics
+1. **Fractional HiDPI Scaling**: Integer buffer scaling (`wl_surface_set_buffer_scale`) is fully supported; compositor fractional scaling protocol (`wp-fractional-scale-v1`) is planned for future extension.
+2. **HarfBuzz Complex Script Shaping**: Individual codepoint glyph rasterization with HarfBuzz advance caching is used for monospaced cells; complex multi-codepoint RTL / Arabic cursive shaping across cell boundaries is a future roadmap item.

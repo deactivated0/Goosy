@@ -22,8 +22,10 @@ enum {
     TAG_SIGNAL  = 3
 };
 
-static int g_epfd  = -1;
-static int g_sigfd = -1;
+static int g_epfd   = -1;
+static int g_sigfd  = -1;
+static int g_pty_fd = -1;
+static uint32_t g_pty_events = EPOLLIN;
 static volatile int g_terminated = 0;
 
 int32_t goot_poll_terminated(void) {
@@ -75,6 +77,8 @@ int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
     }
 
     if (pty_fd >= 0) {
+        g_pty_fd = pty_fd;
+        g_pty_events = EPOLLIN;
         ev.events = EPOLLIN;
         ev.data.u32 = TAG_PTY;
         if (epoll_ctl(g_epfd, EPOLL_CTL_ADD, pty_fd, &ev) < 0) {
@@ -89,6 +93,18 @@ int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
 int32_t goot_poll_wait(int32_t timeout_ms) {
     if (g_epfd < 0) {
         return GOOT_POLL_ERR;
+    }
+
+    if (g_pty_fd >= 0) {
+        uint32_t wanted = EPOLLIN | (goot_pty_has_pending_write() ? EPOLLOUT : 0);
+        if (wanted != g_pty_events) {
+            struct epoll_event ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.events = wanted;
+            ev.data.u32 = TAG_PTY;
+            epoll_ctl(g_epfd, EPOLL_CTL_MOD, g_pty_fd, &ev);
+            g_pty_events = wanted;
+        }
     }
 
     struct epoll_event events[8];
@@ -111,6 +127,9 @@ int32_t goot_poll_wait(int32_t timeout_ms) {
         if (tag == TAG_WAYLAND) {
             mask |= GOOT_POLL_WAYLAND;
         } else if (tag == TAG_PTY) {
+            if (evs & EPOLLOUT) {
+                goot_pty_flush();
+            }
             if (evs & EPOLLIN) {
                 mask |= GOOT_POLL_PTY;
             }

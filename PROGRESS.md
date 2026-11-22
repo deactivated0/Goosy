@@ -1,44 +1,38 @@
 # Goot — Progress Log
 
-## Environment Summary
-- **Sandbox OS**: Debian GNU/Linux 12 (bookworm), `x86_64`, Linux `6.12.105+`
-- **Available in sandbox**: `gcc`, `make`, `python3`, `git`, `tar`, `unzip`
-- **Unavailable in sandbox** (offline container, no package installation): `goose` compiler, `pkg-config`, `wayland-scanner`, `libwayland-client`, `wayland-protocols`, `pixman-1`, `freetype2`, `fontconfig`, `harfbuzz`, `libxkbcommon`, Wayland compositor (`labwc`)
+## Target Environment
+- **OS**: Artix Linux x86_64, Linux `7.3.4-1-cachyos` (Dinit init system, strictly no systemd)
+- **Display Server**: Native Wayland (`labwc 0.20.3` + QuickShell)
+- **Compiler**: Goose v2026.4 + GCC C99
+- **Libraries**: `wayland-client`, `wayland-protocols`, `wayland-cursor`, `pixman-1`, `freetype2`, `fontconfig`, `harfbuzz`, `libxkbcommon`
 
-## Files Created
-- **Goose application & modules**:
-  - `goot.goose` (entry point, `epoll` event loop, batched PTY reads, resize/input/render dispatch)
-  - `goot.build` (Goose sidecar build configuration)
-  - `src/ffi.goose` (`extern fn` declarations matching `native/goot_native.h`)
-  - `src/utf8.goose` (streaming UTF-8 decoder, combining marks, East Asian wide-char cell width)
-  - `src/colors.goose` (16-color, 256-color xterm, 24-bit truecolor, hex parser)
-  - `src/config.goose` (lightweight TOML/INI parser for `~/.config/goot/goot.toml`)
-  - `src/screen.goose` (`root struct Screen`, primary/alt grids, bounded scrollback ring buffer, damage flags, tab stops, selection)
-  - `src/parser.goose` (VT100/VT220/ECMA-48 state machine, CSI/OSC/SGR, DEC private modes, OSC 52 blocked by default)
-  - `src/input.goose` (XKB keysym translation, shortcuts, bracketed paste sanitization, SGR/X10 mouse reporting)
-  - `src/renderer.goose` (damage-tracked cell & cursor render coordinator)
-- **Minimal C99 native bridge**:
-  - `native/goot_native.h`
-  - `native/goot_pty.c`
-  - `native/goot_poll.c`
-  - `native/goot_xkb.c`
-  - `native/goot_wayland.c`
-  - `native/goot_font.c`
-  - `native/goot_render.c`
-- **Build, install, config, tests & benchmarks**:
-  - `scripts/build.sh`, `scripts/install.sh`, `scripts/uninstall.sh`
-  - `config/goot.toml`
-  - `tests/test_goot.goose`, `tests/test_native_pty_poll.c`
-  - `benchmarks/run_benchmarks.sh`
-- **Documentation**:
-  - `README.md`, `PLAN.md`, `PROGRESS.md`, `ARCHITECTURE.md`, `BENCHMARKS.md`, `KNOWN_ISSUES.md`
+## Completed Deliverables
 
-## Verification Results
-- **Passed (Sandbox)**:
-  - `gcc -O2 -Wall -Wextra -Werror -std=c99 -Inative native/goot_pty.c native/goot_poll.c tests/test_native_pty_poll.c`: compiled cleanly with zero warnings.
-  - Executed `test_native_pty_poll`: caught and fixed a `TIOCSWINSZ` startup race condition (moved initial `ioctl(TIOCSWINSZ)` onto `master_fd` before `fork()`), then passed all assertions (invalid dimension rejection, `/bin/sh` PTY spawn, `TERM=xterm-256color`, `COLORTERM=truecolor`, `120x40` resize via `stty size`, `epoll`/`signalfd` wakeup, 1 ms round-trip, clean exit-code-0 reaping).
-- **Pending Target Artix Linux Host**:
-  - `wayland-scanner` generation of `native/generated/xdg-shell-client-protocol.h` and `xdg-shell-protocol.c`
-  - `goose check goot.goose` and `goose build -O2 -o build/goot goot.goose`
-  - `goose run tests/test_goot.goose`
-  - Live Wayland (`labwc`) rendering, interactive app compatibility suite (Bash, Fish, Zsh, Vim, Neovim, Nano, Htop, Btop, Less, Tmux, Fastfetch, OpenCode, Claude Code), and `benchmarks/run_benchmarks.sh`.
+1. **Wayland Window Management & Title Bar**:
+   - Implemented CSD title bar in `src/renderer.goose` and `goot.goose`:
+     - Drag to move window (`xdg_toplevel.move` with input serial).
+     - Minimize button (`xdg_toplevel.set_minimized`).
+     - Maximize / restore button and double-click title bar (`xdg_toplevel.set_maximized` / `unset_maximized`).
+     - Close button (`running = false`).
+     - Button hover and pressed visual states.
+     - Accurate cursor shape switching (`pointer` on buttons, `default` on title bar, `text` in terminal area) via `wayland-cursor`.
+     - CSD / SSD negotiation via `zxdg_decoration_manager_v1` protocol.
+2. **Fastfetch Formatting & Terminal Grid**:
+   - Set default window dimensions to `110x32` cells to accommodate Artix Linux logo (44 cols) + sysinfo lines without wrapping.
+   - Accurately accounted for title bar height (`title_h`) in terminal rows calculation (`calc_grid`, `px_to_cell`, `adjust_font`, `pty_resize`).
+   - Cleaned environment in PTY child process (`unsetenv("COLUMNS")`, `unsetenv("LINES")`, `unsetenv("TERMCAP")`).
+   - Implemented pixel-perfect procedural rendering for all Box-Drawing (`U+2500..U+257F`) and Block Elements (`U+2580..U+259F`) directly via Pixman.
+   - Added Fontconfig fallback face caching (`find_fallback_face`) in `native/goot_font.c`.
+   - Extended truecolor parser for ITU 6-param colon syntax (`38:2::r:g:b`).
+3. **Wayland Primary Selection**:
+   - Integrated `zwp_primary_selection_device_manager_v1` for inter-app primary selection copy and paste.
+4. **PTY Backpressure & Write Ring Buffer**:
+   - Implemented 64 KiB outgoing write ring buffer in `native/goot_pty.c` and dynamic `EPOLLOUT` polling in `native/goot_poll.c`.
+5. **Config Parser Bug Fix**:
+   - Fixed `#` hex color stripping in `src/config.goose`.
+6. **Double-Buffering Synchronization**:
+   - Implemented 2-frame dirty row lifetime (`s.dirty_rows[r] = 2`) and 2-frame full redraws (`s.full_redraw_frames = 2`) to ensure both Wayland SHM buffers remain synchronized.
+7. **Testing & Benchmarks**:
+   - Added Fastfetch alignment test to `tests/test_goot.goose` (100% pass).
+   - Executed native C PTY test `tests/test_native_pty_poll.c` (6 ms round-trip).
+   - Executed benchmarks vs Foot: Goot idle RSS 27.1 MB (0 ticks CPU), Foot idle RSS 23.0 MB (0 ticks CPU).

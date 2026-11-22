@@ -40,6 +40,52 @@ static int32_t       g_cell_w      = 8;
 static int32_t       g_cell_h      = 16;
 static int32_t       g_baseline    = 12;
 
+#define MAX_FALLBACK_FACES 16
+static FT_Face g_fallback_faces[MAX_FALLBACK_FACES];
+static int32_t g_fallback_count = 0;
+
+static FT_Face find_fallback_face(uint32_t codepoint) {
+    for (int32_t i = 0; i < g_fallback_count; i++) {
+        if (g_fallback_faces[i] && FT_Get_Char_Index(g_fallback_faces[i], codepoint) != 0) {
+            return g_fallback_faces[i];
+        }
+    }
+    if (g_fallback_count >= MAX_FALLBACK_FACES) {
+        return NULL;
+    }
+
+    FcPattern *pat = FcPatternCreate();
+    if (!pat) return NULL;
+    FcCharSet *cs = FcCharSetCreate();
+    if (!cs) { FcPatternDestroy(pat); return NULL; }
+    FcCharSetAddChar(cs, codepoint);
+    FcPatternAddCharSet(pat, FC_CHARSET, cs);
+    FcCharSetDestroy(cs);
+    FcPatternAddBool(pat, FC_SCALABLE, FcTrue);
+    FcConfigSubstitute(NULL, pat, FcMatchPattern);
+    FcDefaultSubstitute(pat);
+
+    FcResult res;
+    FcPattern *match = FcFontMatch(NULL, pat, &res);
+    FcPatternDestroy(pat);
+    if (!match) return NULL;
+
+    FcChar8 *file = NULL;
+    FT_Face face = NULL;
+    if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
+        if (FT_New_Face(g_ft, (const char *)file, 0, &face) == 0) {
+            if (FT_HAS_FIXED_SIZES(face) && face->num_fixed_sizes > 0) {
+                FT_Select_Size(face, 0);
+            } else {
+                FT_Set_Char_Size(face, 0, (FT_F26Dot6)g_size_pt * 64, (FT_UInt)g_dpi, (FT_UInt)g_dpi);
+            }
+            g_fallback_faces[g_fallback_count++] = face;
+        }
+    }
+    FcPatternDestroy(match);
+    return face;
+}
+
 static glyph_entry_t g_cache[GLYPH_CACHE_CAP];
 
 static void clear_glyph_cache(void) {
@@ -128,6 +174,11 @@ int32_t goot_font_resize(int32_t size_pt, int32_t dpi) {
     FT_Set_Char_Size(g_face_reg, 0, (FT_F26Dot6)g_size_pt * 64, (FT_UInt)g_dpi, (FT_UInt)g_dpi);
     if (g_face_bold) FT_Set_Char_Size(g_face_bold, 0, (FT_F26Dot6)g_size_pt * 64, (FT_UInt)g_dpi, (FT_UInt)g_dpi);
     if (g_face_ital) FT_Set_Char_Size(g_face_ital, 0, (FT_F26Dot6)g_size_pt * 64, (FT_UInt)g_dpi, (FT_UInt)g_dpi);
+    for (int32_t i = 0; i < g_fallback_count; i++) {
+        if (g_fallback_faces[i] && !(FT_HAS_FIXED_SIZES(g_fallback_faces[i]) && g_fallback_faces[i]->num_fixed_sizes > 0)) {
+            FT_Set_Char_Size(g_fallback_faces[i], 0, (FT_F26Dot6)g_size_pt * 64, (FT_UInt)g_dpi, (FT_UInt)g_dpi);
+        }
+    }
     if (g_hb_reg) hb_ft_font_changed(g_hb_reg);
     clear_glyph_cache();
     update_metrics();
@@ -173,6 +224,17 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
             load_flags = FT_LOAD_RENDER | FT_LOAD_COLOR;
         }
     }
+    if (gid == 0) {
+        FT_Face fb = find_fallback_face(codepoint);
+        if (fb) {
+            FT_UInt fbgid = FT_Get_Char_Index(fb, codepoint);
+            if (fbgid != 0) {
+                face = fb;
+                gid  = fbgid;
+                load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+            }
+        }
+    }
 
     goot_glyph_t *g = &g_cache[idx].glyph;
     memset(g, 0, sizeof(*g));
@@ -210,6 +272,13 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
 
 void goot_font_close(void) {
     clear_glyph_cache();
+    for (int32_t i = 0; i < g_fallback_count; i++) {
+        if (g_fallback_faces[i]) {
+            FT_Done_Face(g_fallback_faces[i]);
+            g_fallback_faces[i] = NULL;
+        }
+    }
+    g_fallback_count = 0;
     if (g_hb_reg)     { hb_font_destroy(g_hb_reg); g_hb_reg = NULL; }
     if (g_face_emoji) { FT_Done_Face(g_face_emoji); g_face_emoji = NULL; }
     if (g_face_ital)  { FT_Done_Face(g_face_ital); g_face_ital = NULL; }

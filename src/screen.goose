@@ -66,7 +66,7 @@ root struct Screen {
     mouse_mode: i32 = 0,
     mouse_sgr: bool = false,
 
-    full_redraw: bool = true,
+    full_redraw_frames: i32 = 2,
     title_dirty: bool = false,
     title: u8[..256] = "Goot",
     cwd: u8[..512] = "",
@@ -112,21 +112,23 @@ fn erase_cell(s: Screen&) -> Cell {
 
 fn mark_row_dirty(s: Screen&, row: i32) {
     if row >= 0 && row < s.rows && (row as i64) < s.dirty_rows.len {
-        s.dirty_rows[row] = 1;
+        s.dirty_rows[row] = 2;
     }
 }
 
 fn mark_all_dirty(s: Screen&) {
-    s.full_redraw = true;
+    s.full_redraw_frames = 2;
     for r in 0..s.rows {
-        if (r as i64) < s.dirty_rows.len { s.dirty_rows[r] = 1; }
+        if (r as i64) < s.dirty_rows.len { s.dirty_rows[r] = 2; }
     }
 }
 
 fn clear_dirty(s: Screen&) {
-    s.full_redraw = false;
+    if s.full_redraw_frames > 0 { s.full_redraw_frames -= 1; }
     for r in 0..s.rows {
-        if (r as i64) < s.dirty_rows.len { s.dirty_rows[r] = 0; }
+        if (r as i64) < s.dirty_rows.len && s.dirty_rows[r] > 0 {
+            s.dirty_rows[r] -= 1;
+        }
     }
 }
 
@@ -169,7 +171,7 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     s.dirty_rows.clear();
     s.prompt_rows.clear();
     for _ in 0..r {
-        s.dirty_rows.push(1);
+        s.dirty_rows.push(2);
         s.prompt_rows.push(0);
     }
     reset_tabs(s);
@@ -187,7 +189,7 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
         for _ in 0..sb_total { s.sb_cells.push(b); }
         for _ in 0..cap { s.sb_prompt_rows.push(0); }
     }
-    s.full_redraw = true;
+    s.full_redraw_frames = 2;
 }
 
 fn clamp_cursor(s: Screen&) {
@@ -369,6 +371,7 @@ fn put_codepoint(s: Screen&, cp: u32) {
 }
 
 fn erase_display(s: Screen&, mode: i32) {
+    s.wrap_pending = false;
     let ec = erase_cell(s);
     if mode == 0 {
         let start = (s.cy as i64) * (s.cols as i64) + (s.cx as i64);
@@ -389,6 +392,7 @@ fn erase_display(s: Screen&, mode: i32) {
 }
 
 fn erase_line(s: Screen&, mode: i32) {
+    s.wrap_pending = false;
     let ec = erase_cell(s);
     let base = (s.cy as i64) * (s.cols as i64);
     if mode == 0 {
@@ -517,10 +521,10 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
 
     s.dirty_rows.clear();
     s.prompt_rows.clear();
-    for _ in 0..nr { s.dirty_rows.push(1); s.prompt_rows.push(0); }
+    for _ in 0..nr { s.dirty_rows.push(2); s.prompt_rows.push(0); }
     reset_tabs(s);
     s.sel_active = false;
-    s.full_redraw = true;
+    s.full_redraw_frames = 2;
 }
 
 fn scroll_viewport(s: Screen&, delta: i32) {

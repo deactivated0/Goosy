@@ -164,6 +164,9 @@ int32_t goot_pty_spawn(goot_const_bytes_t shell_override,
             close(slave_fd);
         }
 
+        unsetenv("COLUMNS");
+        unsetenv("LINES");
+        unsetenv("TERMCAP");
         setenv("TERM", term_str, 1);
         setenv("COLORTERM", "truecolor", 1);
         setenv("TERM_PROGRAM", "goot", 1);
@@ -218,18 +221,70 @@ int64_t goot_pty_read(goot_bytes_t buf) {
     return -1;
 }
 
+#define PTY_WRITE_BUF_CAP (64 * 1024)
+static uint8_t g_write_buf[PTY_WRITE_BUF_CAP];
+static size_t  g_write_head = 0;
+static size_t  g_write_tail = 0;
+
+static size_t pty_write_buf_len(void) {
+    if (g_write_tail >= g_write_head) return g_write_tail - g_write_head;
+    return PTY_WRITE_BUF_CAP - g_write_head + g_write_tail;
+}
+
+static size_t pty_write_buf_free(void) {
+    return PTY_WRITE_BUF_CAP - 1 - pty_write_buf_len();
+}
+
+int32_t goot_pty_has_pending_write(void) {
+    return pty_write_buf_len() > 0 ? 1 : 0;
+}
+
+int64_t goot_pty_flush(void) {
+    if (g_master_fd < 0) return -1;
+    while (g_write_head != g_write_tail) {
+        size_t chunk = (g_write_tail > g_write_head) ? (g_write_tail - g_write_head) : (PTY_WRITE_BUF_CAP - g_write_head);
+        ssize_t n = write(g_master_fd, g_write_buf + g_write_head, chunk);
+        if (n > 0) {
+            g_write_head = (g_write_head + (size_t)n) % PTY_WRITE_BUF_CAP;
+        } else if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                break;
+            }
+            return -1;
+        } else {
+            break;
+        }
+    }
+    return (int64_t)pty_write_buf_len();
+}
+
 int64_t goot_pty_write(goot_const_bytes_t data) {
     if (g_master_fd < 0 || !data.data || data.len <= 0) {
         return 0;
     }
-    ssize_t n = write(g_master_fd, data.data, (size_t)data.len);
-    if (n >= 0) {
-        return (int64_t)n;
+    if (g_write_head != g_write_tail) {
+        goot_pty_flush();
     }
-    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-        return 0;
+    size_t written = 0;
+    if (g_write_head == g_write_tail) {
+        ssize_t n = write(g_master_fd, data.data, (size_t)data.len);
+        if (n > 0) {
+            written = (size_t)n;
+        } else if (n < 0 && (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
+            return -1;
+        }
     }
-    return -1;
+    if (written < (size_t)data.len) {
+        size_t rem = (size_t)data.len - written;
+        size_t avail = pty_write_buf_free();
+        size_t to_queue = rem < avail ? rem : avail;
+        for (size_t i = 0; i < to_queue; i++) {
+            g_write_buf[g_write_tail] = data.data[written + i];
+            g_write_tail = (g_write_tail + 1) % PTY_WRITE_BUF_CAP;
+        }
+        written += to_queue;
+    }
+    return (int64_t)written;
 }
 
 int32_t goot_pty_resize(int32_t cols, int32_t rows, int32_t width_px, int32_t height_px) {

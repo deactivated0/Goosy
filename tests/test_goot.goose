@@ -129,9 +129,43 @@ fn test_shortcuts_and_goot_ini() {
     assert(input::check_shortcut('X', ffi::MOD_CTRL | ffi::MOD_SHIFT) == input::ACT_PROMPT_NEXT);
 
     var cfg = config::default_config();
-    config::parse_text(cfg, "[touch]\nlong-press-delay = 550\n[url]\nlabel-letters = asdf\n");
+    config::parse_text(cfg, "[touch]\nlong-press-delay = 550\n[url]\nlabel-letters = asdf\n[colors]\nbackground = #1a1b26\nforeground = #c0caf5 # inline comment\nregular0 = #15161e\n");
     assert(cfg.touch_long_press_ms == 550);
     assert(cfg.url_label_letters.len == 4);
+    assert(cfg.palette.bg == 0x1a1b26);
+    assert(cfg.palette.fg == 0xc0caf5);
+    assert(cfg.palette.ansi[0] == 0x15161e);
+}
+
+fn test_fastfetch_alignment_and_box_drawing() {
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 120, 30, pal.fg, pal.bg, 100, 0);
+    var par = parser::new_parser(false);
+
+    // Fastfetch line with Artix logo on left (col 0..43) and sysinfo on right (col 44..),
+    // testing ITU colon truecolor syntax, bold SGR, and box-drawing horizontal lines (U+2500).
+    let sample = "                    '                       \x1b[38:2::0;150;255mArtix Linux\x1b[0m\r\n                   'o'                      \x1b[1mSYSTEM\x1b[0m ────────────────────────────────────────────────────────\r\n";
+    parser::feed_slice(par, scr, pal, sample);
+
+    // Row 0 checks:
+    let c_quote = screen::visible_cell(scr, 20, 0);
+    assert(c_quote.cp == '\'' as u32);
+    let c_a = screen::visible_cell(scr, 44, 0);
+    assert(c_a.cp == 'A' as u32);
+    assert(c_a.fg == 0x0096FF); // 0, 150, 255 RGB
+
+    // Row 1 checks:
+    let c_o = screen::visible_cell(scr, 20, 1);
+    assert(c_o.cp == 'o' as u32);
+    let c_sys = screen::visible_cell(scr, 44, 1);
+    assert(c_sys.cp == 'S' as u32);
+    let c_dash = screen::visible_cell(scr, 51, 1);
+    assert(c_dash.cp == 0x2500);
+
+    // Row 2 should be empty (no unwanted wrapping occurred)
+    let c_r2 = screen::visible_cell(scr, 0, 2);
+    assert(c_r2.cp == 0 || c_r2.cp == 0x20);
 }
 
 fn main() {
@@ -140,5 +174,6 @@ fn main() {
     test_search_url_and_unicode_modes();
     test_mouse_selection_modes();
     test_shortcuts_and_goot_ini();
+    test_fastfetch_alignment_and_box_drawing();
     print("goot: all Goose unit tests passed");
 }

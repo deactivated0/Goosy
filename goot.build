@@ -10,6 +10,8 @@ c_sources = [
     "native/goot_font.c",
     "native/goot_render.c",
     "native/generated/xdg-shell-protocol.c",
+    "native/generated/xdg-decoration-unstable-v1-protocol.c",
+    "native/generated/primary-selection-unstable-v1-protocol.c",
 ];
 
 c_include = [
@@ -35,6 +37,7 @@ c_flags_cc = [
 
 c_libs_linux = [
     "wayland-client",
+    "wayland-cursor",
     "pixman-1",
     "freetype",
     "fontconfig",

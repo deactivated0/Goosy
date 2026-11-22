@@ -74,6 +74,194 @@ void goot_render_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t 
     goot_render_damage(x, y, w, h);
 }
 
+static bool render_procedural_glyph(int32_t px, int32_t py, int32_t w, int32_t h,
+                                    uint32_t cp, uint32_t fg_rgb, uint32_t bg_rgb) {
+    if (cp < 0x2500 || cp > 0x259F) return false;
+
+    int32_t t = h >= 28 ? 2 : 1;
+    int32_t th = t * 2;
+    int32_t mx = px + w / 2;
+    int32_t my = py + h / 2;
+
+    /* Block Elements U+2580..U+259F */
+    if (cp >= 0x2580 && cp <= 0x259F) {
+        switch (cp) {
+            case 0x2580: goot_render_fill_rect(px, py, w, h / 2, fg_rgb); return true;
+            case 0x2581: goot_render_fill_rect(px, py + h - (h / 8 > 0 ? h / 8 : 1), w, h / 8 > 0 ? h / 8 : 1, fg_rgb); return true;
+            case 0x2582: goot_render_fill_rect(px, py + h - h / 4, w, h / 4, fg_rgb); return true;
+            case 0x2583: goot_render_fill_rect(px, py + h - (h * 3) / 8, w, (h * 3) / 8, fg_rgb); return true;
+            case 0x2584: goot_render_fill_rect(px, py + h / 2, w, h - h / 2, fg_rgb); return true;
+            case 0x2585: goot_render_fill_rect(px, py + h - (h * 5) / 8, w, (h * 5) / 8, fg_rgb); return true;
+            case 0x2586: goot_render_fill_rect(px, py + h - (h * 3) / 4, w, (h * 3) / 4, fg_rgb); return true;
+            case 0x2587: goot_render_fill_rect(px, py + h - (h * 7) / 8, w, (h * 7) / 8, fg_rgb); return true;
+            case 0x2588: goot_render_fill_rect(px, py, w, h, fg_rgb); return true;
+            case 0x2589: goot_render_fill_rect(px, py, (w * 7) / 8, h, fg_rgb); return true;
+            case 0x258A: goot_render_fill_rect(px, py, (w * 3) / 4, h, fg_rgb); return true;
+            case 0x258B: goot_render_fill_rect(px, py, (w * 5) / 8, h, fg_rgb); return true;
+            case 0x258C: goot_render_fill_rect(px, py, w / 2, h, fg_rgb); return true;
+            case 0x258D: goot_render_fill_rect(px, py, (w * 3) / 8, h, fg_rgb); return true;
+            case 0x258E: goot_render_fill_rect(px, py, w / 4, h, fg_rgb); return true;
+            case 0x258F: goot_render_fill_rect(px, py, w / 8 > 0 ? w / 8 : 1, h, fg_rgb); return true;
+            case 0x2590: goot_render_fill_rect(px + w / 2, py, w - w / 2, h, fg_rgb); return true;
+            case 0x2591: {
+                uint32_t r = (((fg_rgb >> 16) & 0xFF) + 3 * ((bg_rgb >> 16) & 0xFF)) / 4;
+                uint32_t g = (((fg_rgb >> 8)  & 0xFF) + 3 * ((bg_rgb >> 8)  & 0xFF)) / 4;
+                uint32_t b = ((fg_rgb & 0xFF)        + 3 * (bg_rgb & 0xFF))        / 4;
+                goot_render_fill_rect(px, py, w, h, (r << 16) | (g << 8) | b);
+                return true;
+            }
+            case 0x2592: {
+                uint32_t r = (((fg_rgb >> 16) & 0xFF) + ((bg_rgb >> 16) & 0xFF)) / 2;
+                uint32_t g = (((fg_rgb >> 8)  & 0xFF) + ((bg_rgb >> 8)  & 0xFF)) / 2;
+                uint32_t b = ((fg_rgb & 0xFF)        + (bg_rgb & 0xFF))        / 2;
+                goot_render_fill_rect(px, py, w, h, (r << 16) | (g << 8) | b);
+                return true;
+            }
+            case 0x2593: {
+                uint32_t r = (3 * ((fg_rgb >> 16) & 0xFF) + ((bg_rgb >> 16) & 0xFF)) / 4;
+                uint32_t g = (3 * ((fg_rgb >> 8)  & 0xFF) + ((bg_rgb >> 8)  & 0xFF)) / 4;
+                uint32_t b = (3 * (fg_rgb & 0xFF)        + (bg_rgb & 0xFF))        / 4;
+                goot_render_fill_rect(px, py, w, h, (r << 16) | (g << 8) | b);
+                return true;
+            }
+            case 0x2594: goot_render_fill_rect(px, py, w, h / 8 > 0 ? h / 8 : 1, fg_rgb); return true;
+            case 0x2595: goot_render_fill_rect(px + w - (w / 8 > 0 ? w / 8 : 1), py, w / 8 > 0 ? w / 8 : 1, h, fg_rgb); return true;
+            case 0x2596: goot_render_fill_rect(px, py + h / 2, w / 2, h - h / 2, fg_rgb); return true;
+            case 0x2597: goot_render_fill_rect(px + w / 2, py + h / 2, w - w / 2, h - h / 2, fg_rgb); return true;
+            case 0x2598: goot_render_fill_rect(px, py, w / 2, h / 2, fg_rgb); return true;
+            case 0x259A:
+                goot_render_fill_rect(px, py, w / 2, h / 2, fg_rgb);
+                goot_render_fill_rect(px + w / 2, py + h / 2, w - w / 2, h - h / 2, fg_rgb);
+                return true;
+            case 0x259D: goot_render_fill_rect(px + w / 2, py, w - w / 2, h / 2, fg_rgb); return true;
+            default: break;
+        }
+    }
+
+    /* Box Drawing U+2500..U+257F */
+    int l = 0, r = 0, u = 0, d = 0;
+    switch (cp) {
+        case 0x2500: case 0x2504: case 0x2508: l = 1; r = 1; break;
+        case 0x2501: case 0x2505: case 0x2509: l = 2; r = 2; break;
+        case 0x2502: case 0x2506: case 0x250A: u = 1; d = 1; break;
+        case 0x2503: case 0x2507: case 0x250B: u = 2; d = 2; break;
+        case 0x250C: case 0x256D: d = 1; r = 1; break;
+        case 0x250D: d = 1; r = 2; break;
+        case 0x250E: d = 2; r = 1; break;
+        case 0x250F: d = 2; r = 2; break;
+        case 0x2510: case 0x256E: d = 1; l = 1; break;
+        case 0x2511: d = 1; l = 2; break;
+        case 0x2512: d = 2; l = 1; break;
+        case 0x2513: d = 2; l = 2; break;
+        case 0x2514: case 0x2570: u = 1; r = 1; break;
+        case 0x2515: u = 1; r = 2; break;
+        case 0x2516: u = 2; r = 1; break;
+        case 0x2517: u = 2; r = 2; break;
+        case 0x2518: case 0x256F: u = 1; l = 1; break;
+        case 0x2519: u = 1; l = 2; break;
+        case 0x251A: u = 2; l = 1; break;
+        case 0x251B: u = 2; l = 2; break;
+        case 0x251C: u = 1; d = 1; r = 1; break;
+        case 0x251D: u = 1; d = 1; r = 2; break;
+        case 0x251E: u = 2; d = 1; r = 1; break;
+        case 0x251F: u = 1; d = 2; r = 1; break;
+        case 0x2520: u = 2; d = 2; r = 1; break;
+        case 0x2521: u = 1; d = 2; r = 2; break;
+        case 0x2522: u = 2; d = 1; r = 2; break;
+        case 0x2523: u = 2; d = 2; r = 2; break;
+        case 0x2524: u = 1; d = 1; l = 1; break;
+        case 0x2525: u = 1; d = 1; l = 2; break;
+        case 0x2526: u = 2; d = 1; l = 1; break;
+        case 0x2527: u = 1; d = 2; l = 1; break;
+        case 0x2528: u = 2; d = 2; l = 1; break;
+        case 0x2529: u = 1; d = 2; l = 2; break;
+        case 0x252A: u = 2; d = 1; l = 2; break;
+        case 0x252B: u = 2; d = 2; l = 2; break;
+        case 0x252C: l = 1; r = 1; d = 1; break;
+        case 0x252D: l = 2; r = 1; d = 1; break;
+        case 0x252E: l = 1; r = 2; d = 1; break;
+        case 0x252F: l = 2; r = 2; d = 1; break;
+        case 0x2530: l = 1; r = 1; d = 2; break;
+        case 0x2531: l = 2; r = 1; d = 2; break;
+        case 0x2532: l = 1; r = 2; d = 2; break;
+        case 0x2533: l = 2; r = 2; d = 2; break;
+        case 0x2534: l = 1; r = 1; u = 1; break;
+        case 0x2535: l = 2; r = 1; u = 1; break;
+        case 0x2536: l = 1; r = 2; u = 1; break;
+        case 0x2537: l = 2; r = 2; u = 1; break;
+        case 0x2538: l = 1; r = 1; u = 2; break;
+        case 0x2539: l = 2; r = 1; u = 2; break;
+        case 0x253A: l = 1; r = 2; u = 2; break;
+        case 0x253B: l = 2; r = 2; u = 2; break;
+        case 0x253C: l = 1; r = 1; u = 1; d = 1; break;
+        case 0x253D: l = 2; r = 1; u = 1; d = 1; break;
+        case 0x253E: l = 1; r = 2; u = 1; d = 1; break;
+        case 0x253F: l = 2; r = 2; u = 1; d = 1; break;
+        case 0x2540: l = 1; r = 1; u = 2; d = 1; break;
+        case 0x2541: l = 1; r = 1; u = 1; d = 2; break;
+        case 0x2542: l = 1; r = 1; u = 2; d = 2; break;
+        case 0x254B: l = 2; r = 2; u = 2; d = 2; break;
+        case 0x2550: l = 3; r = 3; break;
+        case 0x2551: u = 3; d = 3; break;
+        case 0x2554: d = 3; r = 3; break;
+        case 0x2557: d = 3; l = 3; break;
+        case 0x255A: u = 3; r = 3; break;
+        case 0x255D: u = 3; l = 3; break;
+        case 0x2560: u = 3; d = 3; r = 3; break;
+        case 0x2563: u = 3; d = 3; l = 3; break;
+        case 0x2566: l = 3; r = 3; d = 3; break;
+        case 0x2569: l = 3; r = 3; u = 3; break;
+        case 0x256C: l = 3; r = 3; u = 3; d = 3; break;
+        case 0x2574: l = 1; break;
+        case 0x2575: u = 1; break;
+        case 0x2576: r = 1; break;
+        case 0x2577: d = 1; break;
+        case 0x2578: l = 2; break;
+        case 0x2579: u = 2; break;
+        case 0x257A: r = 2; break;
+        case 0x257B: d = 2; break;
+        default: return false;
+    }
+
+    if (l) {
+        int32_t lw = l == 3 ? 1 : (l == 2 ? th : t);
+        if (l == 3) {
+            goot_render_fill_rect(px, my - t - 1, mx - px + 1, 1, fg_rgb);
+            goot_render_fill_rect(px, my + t, mx - px + 1, 1, fg_rgb);
+        } else {
+            goot_render_fill_rect(px, my - lw / 2, mx - px + (r ? 1 : 0), lw, fg_rgb);
+        }
+    }
+    if (r) {
+        int32_t rw = r == 3 ? 1 : (r == 2 ? th : t);
+        if (r == 3) {
+            goot_render_fill_rect(mx, my - t - 1, px + w - mx, 1, fg_rgb);
+            goot_render_fill_rect(mx, my + t, px + w - mx, 1, fg_rgb);
+        } else {
+            goot_render_fill_rect(mx - (l ? 0 : rw / 2), my - rw / 2, px + w - mx + (l ? 0 : rw / 2), rw, fg_rgb);
+        }
+    }
+    if (u) {
+        int32_t uw = u == 3 ? 1 : (u == 2 ? th : t);
+        if (u == 3) {
+            goot_render_fill_rect(mx - t - 1, py, 1, my - py + 1, fg_rgb);
+            goot_render_fill_rect(mx + t, py, 1, my - py + 1, fg_rgb);
+        } else {
+            goot_render_fill_rect(mx - uw / 2, py, uw, my - py + (d ? 1 : 0), fg_rgb);
+        }
+    }
+    if (d) {
+        int32_t dw = d == 3 ? 1 : (d == 2 ? th : t);
+        if (d == 3) {
+            goot_render_fill_rect(mx - t - 1, my, 1, py + h - my, fg_rgb);
+            goot_render_fill_rect(mx + t, my, 1, py + h - my, fg_rgb);
+        } else {
+            goot_render_fill_rect(mx - dw / 2, my - (u ? 0 : dw / 2), dw, py + h - my + (u ? 0 : dw / 2), fg_rgb);
+        }
+    }
+    return true;
+}
+
 void goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
                       uint32_t codepoint, uint32_t fg_rgb, uint32_t bg_rgb,
                       uint32_t attr_flags, int32_t span_cols) {
@@ -84,8 +272,10 @@ void goot_render_cell(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
     /* 1. Fill cell background */
     goot_render_fill_rect(px, py, total_w, cell_h, bg_rgb);
 
-    /* 2. Composite rasterized glyph if printable */
-    if (codepoint > 0x20U) {
+    /* 2. Procedural rendering for Box-Drawing and Block Elements */
+    if (render_procedural_glyph(px, py, total_w, cell_h, codepoint, fg_rgb, bg_rgb)) {
+        /* handled procedurally with pixel precision */
+    } else if (codepoint > 0x20U) {
         uint8_t style = (uint8_t)(attr_flags & 0x03U); /* bit0=bold, bit1=italic */
         const goot_glyph_t *g = goot_font_get_glyph(codepoint, style);
         if (g && g->bitmap && g->width > 0 && g->height > 0) {

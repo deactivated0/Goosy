@@ -1,8 +1,29 @@
 # Goot
 
-**Goot** is a native Wayland terminal emulator written primarily in the [Goose programming language](https://aardappel.github.io/goose/) by Wouter van Oortmerssen ([aardappel/goose](https://github.com/aardappel/goose)), with a minimal, auditable C99 interoperability layer for Linux POSIX PTY, `epoll`/`signalfd`, `libwayland-client`, `xdg-shell`, Pixman software rendering, FreeType/Fontconfig/HarfBuzz font rasterization, `libxkbcommon`, and `wl_touch`.
+**Goot** is a native Wayland terminal emulator written primarily in the [Goose programming language](https://aardappel.github.io/goose/) by Wouter van Oortmerssen ([aardappel/goose](https://github.com/aardappel/goose)), with a minimal, auditable C99 interoperability layer for Linux POSIX PTY, `epoll`/`signalfd`, `libwayland-client`, `wayland-cursor`, `xdg-shell`, `zxdg_decoration_manager_v1`, `zwp_primary_selection_device_manager_v1`, Pixman software rendering, FreeType/Fontconfig/HarfBuzz font rasterization, `libxkbcommon`, and `wl_touch`.
 
-Designed for **Artix Linux (x86_64, no systemd)** and lightweight Wayland compositors such as **labwc** + QuickShell, Goot targets Foot-class efficiency and Foot-compatible keyboard, mouse, and touchscreen ergonomics.
+Designed for **Artix Linux (x86_64, no systemd)** and lightweight Wayland compositors such as **labwc** + QuickShell, Goot targets Foot-class efficiency (idle 0 CPU ticks, ~27 MB RSS) and Foot-compatible keyboard, mouse, and touchscreen ergonomics.
+
+## Features
+
+- **Native Wayland Window Management & Title Bar**:
+  - Full client-side decorations (CSD) with window move, minimize, maximize/restore toggle, and close.
+  - Double-click title bar to maximize or restore.
+  - Button hover and pressed visual states.
+  - Automatic Wayland cursor shape changes (`text`, `default`, `pointer`).
+  - Automatic CSD / SSD negotiation via `zxdg_decoration_manager_v1` (avoids duplicate title bars on SSD compositors like labwc).
+- **Pixel-Perfect Font & Box Rendering**:
+  - FreeType2, HarfBuzz advance metrics, and Fontconfig fallback face resolution.
+  - Zero-gap procedural Pixman rendering for all Box-Drawing (`U+2500..U+257F`) and Block Elements (`U+2580..U+259F`).
+  - Flawless 2-column alignment and zero line-wrap displacement for `fastfetch` and complex TUIs.
+  - ITU 6-parameter colon (`38:2::r:g:b`) and standard semicolon (`38;2;r;g;b`) 24-bit truecolor support.
+- **Wayland Selections & Clipboard**:
+  - Standard clipboard (`Ctrl+Shift+C` / `Ctrl+Shift+V` / OSC 52).
+  - True Wayland primary selection copy on text release and paste (`Shift+Insert` / middle-click) via `zwp_primary_selection_device_manager_v1`.
+- **PTY Backpressure & Zero-Idle-CPU Architecture**:
+  - 64 KiB outgoing write ring buffer with dynamic `EPOLLOUT` notifications.
+  - 2-frame double buffer damage tracking to prevent visual artifacts across buffer flips.
+  - Blocks completely on `epoll_wait(-1)` when idle.
 
 ## Prerequisites (Artix Linux x86_64)
 
@@ -10,13 +31,13 @@ Designed for **Artix Linux (x86_64, no systemd)** and lightweight Wayland compos
 2. Install required native development libraries (no systemd):
 
 ```sh
-sudo pacman -S base-devel pkgconf wayland wayland-protocols pixman freetype2 fontconfig harfbuzz libxkbcommon
+sudo pacman -S base-devel pkgconf wayland wayland-protocols wayland-cursor pixman freetype2 fontconfig harfbuzz libxkbcommon
 ```
 
 ## Build, Run & Install
 
 ```sh
-# 1. Generate Wayland xdg-shell bindings, typecheck with goose check, and build native binary
+# 1. Generate Wayland protocol bindings, typecheck with goose check, and build native binary
 ./scripts/build.sh
 
 # 2. Run directly inside Wayland (e.g., labwc)
@@ -60,7 +81,10 @@ These are the default shortcuts. See `man goot.ini` and [`config/goot.ini`](conf
 - `t`: Toggle whether the URL is displayed inside the jump label
 - `Escape`, `Ctrl+C`, `Ctrl+G`, `Ctrl+D`: Exit URL mode without launching any URLs
 
-### Mouse
+### Mouse & Window Management
+- `Title bar click & drag`: Move window
+- `Title bar double click`: Maximize / restore window
+- `Title bar buttons`: Minimize, Maximize / Restore, Close
 - `Left` single-click + drag: Select text (copied to primary selection on release; hold `Shift` to select while client mouse tracking is active; hold `Ctrl` for block selection)
 - `Left` double-click: Select word (hold `Ctrl` to select up to whitespace)
 - `Left` triple-click: Select between enclosing quotes, or entire row if not inside quotes

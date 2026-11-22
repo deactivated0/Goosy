@@ -10,19 +10,27 @@ let CURSOR_BLOCK     = 0;
 let CURSOR_UNDERLINE = 1;
 let CURSOR_BEAM      = 2;
 
+let DECO_AUTO   = 0;
+let DECO_SERVER = 1;
+let DECO_CLIENT = 2;
+let DECO_NONE   = 3;
+
 struct Config {
     font_family: u8[..128] = "monospace",
     font_size: i32 = 11,
     line_spacing: i32 = 0,
     padding: i32 = 8,
-    initial_cols: i32 = 100,
-    initial_rows: i32 = 30,
+    initial_cols: i32 = 110,
+    initial_rows: i32 = 32,
     title: u8[..128] = "Goot",
     cursor_style: i32 = 0,
     scrollback_lines: i32 = 4000,
     allow_osc52: bool = false,
     touch_long_press_ms: i32 = 400,
     url_label_letters: u8[..64] = "sadfjklewcmpgh",
+    title_bar: bool = true,
+    title_bar_height: i32 = 28,
+    decorations: i32 = 0, // 0=auto, 1=server, 2=client, 3=none
     palette: colors::Palette = colors::Palette { .. },
 }
 
@@ -119,6 +127,16 @@ fn apply_kv(cfg: Config&, section: const u8[:], key: const u8[:], raw_val: const
             if ok && n >= 5 && n <= 200 { cfg.initial_rows = n; }
         } else if eq_str(key, "title") && val.len > 0 {
             copy_128(cfg.title, val);
+        } else if eq_str(key, "decorations") {
+            if eq_str(val, "auto") { cfg.decorations = DECO_AUTO; }
+            else if eq_str(val, "server") || eq_str(val, "ssd") { cfg.decorations = DECO_SERVER; }
+            else if eq_str(val, "client") || eq_str(val, "csd") { cfg.decorations = DECO_CLIENT; }
+            else if eq_str(val, "none") { cfg.decorations = DECO_NONE; }
+        } else if eq_str(key, "title-bar") || eq_str(key, "title_bar") {
+            cfg.title_bar = eq_str(val, "true") || eq_str(val, "yes") || eq_str(val, "1");
+        } else if eq_str(key, "title-bar-height") || eq_str(key, "title_bar_height") {
+            let n, ok = parse_i32(val);
+            if ok && n >= 16 && n <= 64 { cfg.title_bar_height = n; }
         }
     } else if eq_str(section, "cursor") {
         if eq_str(key, "style") {
@@ -177,12 +195,34 @@ fn parse_text(cfg: Config&, text: const u8[:]) {
 
         var in_quote = false;
         var clean_end = raw_line.len;
+        var first_non_ws: i64 = -1;
         for i in 0..raw_line.len {
             let c = raw_line[i];
-            if c == '"' { in_quote = !in_quote; }
-            else if (c == '#' || c == ';') && !in_quote {
-                clean_end = i;
-                break;
+            if !is_ws(c) && first_non_ws < 0 {
+                first_non_ws = i;
+            }
+            if c == '"' {
+                in_quote = !in_quote;
+            } else if !in_quote {
+                if (c == '#' || c == ';') && i == first_non_ws {
+                    clean_end = i;
+                    break;
+                } else if c == ';' && i > 0 && is_ws(raw_line[i - 1]) {
+                    clean_end = i;
+                    break;
+                } else if c == '#' && i > 0 && is_ws(raw_line[i - 1]) {
+                    var is_hex = false;
+                    if i + 1 < raw_line.len {
+                        let nc = raw_line[i + 1];
+                        if colors::hex_nibble(nc) >= 0 {
+                            is_hex = true;
+                        }
+                    }
+                    if !is_hex {
+                        clean_end = i;
+                        break;
+                    }
+                }
             }
         }
 

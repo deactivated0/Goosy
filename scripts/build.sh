@@ -45,9 +45,12 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-echo "[goot] Generating Wayland xdg-shell protocol bindings..."
+echo "[goot] Generating Wayland protocol bindings..."
 WL_PROTO_DIR=$(pkg-config --variable=pkgdatadir wayland-protocols)
 XDG_XML="$WL_PROTO_DIR/stable/xdg-shell/xdg-shell.xml"
+DECO_XML="$WL_PROTO_DIR/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml"
+PRIM_XML="$WL_PROTO_DIR/unstable/primary-selection/primary-selection-unstable-v1.xml"
+
 if [ ! -f "$XDG_XML" ]; then
     echo "ERROR: Could not locate xdg-shell.xml at $XDG_XML" >&2
     exit 1
@@ -56,6 +59,16 @@ fi
 mkdir -p native/generated build
 wayland-scanner client-header "$XDG_XML" native/generated/xdg-shell-client-protocol.h
 wayland-scanner private-code  "$XDG_XML" native/generated/xdg-shell-protocol.c
+
+if [ -f "$DECO_XML" ]; then
+    wayland-scanner client-header "$DECO_XML" native/generated/xdg-decoration-unstable-v1-client-protocol.h
+    wayland-scanner private-code  "$DECO_XML" native/generated/xdg-decoration-unstable-v1-protocol.c
+fi
+
+if [ -f "$PRIM_XML" ]; then
+    wayland-scanner client-header "$PRIM_XML" native/generated/primary-selection-unstable-v1-client-protocol.h
+    wayland-scanner private-code  "$PRIM_XML" native/generated/primary-selection-unstable-v1-protocol.c
+fi
 
 echo "[goot] Typechecking Goose sources (goose check)..."
 goose check goot.goose

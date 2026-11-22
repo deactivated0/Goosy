@@ -5,8 +5,12 @@
  * Wayland clipboard (wl_data_device), and primary selection buffer.
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "goot_native.h"
 
@@ -15,10 +19,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 
 #include "xdg-shell-client-protocol.h"
+#include "xdg-decoration-unstable-v1-client-protocol.h"
+#include "primary-selection-unstable-v1-client-protocol.h"
 
 #define GOOT_EV_QUEUE_CAP 256
 #define GOOT_CLIP_MAX     (256 * 1024)
@@ -51,6 +59,24 @@ static struct wl_surface             *g_surface    = NULL;
 static struct xdg_surface            *g_xdg_surf   = NULL;
 static struct xdg_toplevel           *g_toplevel   = NULL;
 static struct wl_callback            *g_frame_cb   = NULL;
+
+static struct zxdg_decoration_manager_v1        *g_deco_mgr        = NULL;
+static struct zxdg_toplevel_decoration_v1       *g_toplevel_deco   = NULL;
+static int32_t                                   g_deco_pref       = 0; /* 0=auto, 1=server, 2=client, 3=none */
+static uint32_t                                  g_negotiated_deco = 0;
+
+static struct zwp_primary_selection_device_manager_v1 *g_prim_mgr   = NULL;
+static struct zwp_primary_selection_device_v1         *g_prim_dev   = NULL;
+static struct zwp_primary_selection_source_v1         *g_prim_src   = NULL;
+static struct zwp_primary_selection_offer_v1          *g_prim_offer = NULL;
+
+static struct wl_cursor_theme *g_cursor_theme   = NULL;
+static struct wl_surface      *g_cursor_surface = NULL;
+static int32_t                 g_cursor_shape   = -1;
+
+static bool g_is_maximized  = false;
+static bool g_is_fullscreen = false;
+static bool g_is_activated  = true;
 
 static int32_t  g_width       = 800;
 static int32_t  g_height      = 600;
@@ -209,9 +235,21 @@ static const struct xdg_surface_listener g_xdg_surface_listener = { .configure =
 
 static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
                                    int32_t width, int32_t height, struct wl_array *states) {
-    (void)data; (void)toplevel; (void)states;
+    (void)data; (void)toplevel;
     if (width > 0 && width <= GOOT_MAX_DIM)   g_width  = width;
     if (height > 0 && height <= GOOT_MAX_DIM) g_height = height;
+
+    g_is_maximized = false;
+    g_is_fullscreen = false;
+    g_is_activated = false;
+    if (states && states->data) {
+        uint32_t *state;
+        wl_array_for_each(state, states) {
+            if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED)  g_is_maximized = true;
+            if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN) g_is_fullscreen = true;
+            if (*state == XDG_TOPLEVEL_STATE_ACTIVATED)  g_is_activated = true;
+        }
+    }
 }
 static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
     (void)data; (void)toplevel; push_ev3(GOOT_EV_CLOSE, 0, 0, 0);
@@ -270,10 +308,66 @@ static const struct wl_keyboard_listener g_kb_listener = {
     .key = kb_key, .modifiers = kb_modifiers, .repeat_info = kb_repeat_info,
 };
 
+void goot_wl_set_cursor_shape(int32_t shape) {
+    if (!g_pointer || !g_shm || !g_display) return;
+    if (g_cursor_shape == shape && g_cursor_surface) return;
+    g_cursor_shape = shape;
+
+    if (!g_cursor_theme) {
+        const char *size_str = getenv("XCURSOR_SIZE");
+        int size = 24;
+        if (size_str) {
+            int s = atoi(size_str);
+            if (s >= 16 && s <= 128) size = s;
+        }
+        size *= (g_scale > 0 ? g_scale : 1);
+        const char *theme = getenv("XCURSOR_THEME");
+        g_cursor_theme = wl_cursor_theme_load(theme, size, g_shm);
+    }
+    if (!g_cursor_theme) return;
+
+    const char *names[3][3] = {
+        { "text", "xterm", "ibeam" },
+        { "default", "left_ptr", "arrow" },
+        { "pointer", "hand2", "hand" }
+    };
+    int idx = (shape >= 0 && shape <= 2) ? shape : 1;
+    struct wl_cursor *cur = NULL;
+    for (int k = 0; k < 3; k++) {
+        cur = wl_cursor_theme_get_cursor(g_cursor_theme, names[idx][k]);
+        if (cur) break;
+    }
+    if (!cur && idx != 1) {
+        for (int k = 0; k < 3; k++) {
+            cur = wl_cursor_theme_get_cursor(g_cursor_theme, names[1][k]);
+            if (cur) break;
+        }
+    }
+    if (!cur || cur->image_count < 1) return;
+
+    struct wl_cursor_image *img = cur->images[0];
+    struct wl_buffer *buf = wl_cursor_image_get_buffer(img);
+    if (!buf) return;
+
+    if (!g_cursor_surface && g_compositor) {
+        g_cursor_surface = wl_compositor_create_surface(g_compositor);
+    }
+    if (!g_cursor_surface) return;
+
+    wl_surface_attach(g_cursor_surface, buf, 0, 0);
+    wl_surface_damage_buffer(g_cursor_surface, 0, 0, (int32_t)img->width, (int32_t)img->height);
+    wl_surface_commit(g_cursor_surface);
+
+    wl_pointer_set_cursor(g_pointer, g_last_serial, g_cursor_surface,
+                          (int32_t)img->hotspot_x, (int32_t)img->hotspot_y);
+}
+
 static void ptr_enter(void *data, struct wl_pointer *p, uint32_t serial,
                       struct wl_surface *sf, wl_fixed_t sx, wl_fixed_t sy) {
     (void)data; (void)p; (void)sf;
     g_last_serial = serial;
+    g_cursor_shape = -1;
+    goot_wl_set_cursor_shape(1);
     push_ev3(GOOT_EV_POINTER_MOTION, wl_fixed_to_int(sx), wl_fixed_to_int(sy), goot_xkb_current_mods());
 }
 static void ptr_leave(void *data, struct wl_pointer *p, uint32_t serial, struct wl_surface *sf) {
@@ -384,6 +478,53 @@ static const struct wl_data_device_listener g_data_dev_listener = {
     .motion = data_dev_motion, .drop = data_dev_drop, .selection = data_dev_selection,
 };
 
+static void deco_configure(void *data, struct zxdg_toplevel_decoration_v1 *deco, uint32_t mode) {
+    (void)data; (void)deco;
+    g_negotiated_deco = mode;
+}
+static const struct zxdg_toplevel_decoration_v1_listener g_deco_listener = {
+    .configure = deco_configure,
+};
+
+static void prim_source_send(void *data, struct zwp_primary_selection_source_v1 *src,
+                             const char *mime, int32_t fd) {
+    (void)data; (void)src;
+    if (mime && (strcmp(mime, "text/plain;charset=utf-8") == 0 ||
+                 strcmp(mime, "text/plain") == 0 || strcmp(mime, "UTF8_STRING") == 0)) {
+        int64_t off = 0;
+        while (off < g_primary_len) {
+            ssize_t n = write(fd, g_primary_buf + off, (size_t)(g_primary_len - off));
+            if (n <= 0) break;
+            off += (int64_t)n;
+        }
+    }
+    close(fd);
+}
+static void prim_source_cancelled(void *data, struct zwp_primary_selection_source_v1 *src) {
+    (void)data;
+    if (g_prim_src == src) g_prim_src = NULL;
+    zwp_primary_selection_source_v1_destroy(src);
+}
+static const struct zwp_primary_selection_source_v1_listener g_prim_source_listener = {
+    .send      = prim_source_send,
+    .cancelled = prim_source_cancelled,
+};
+
+static void prim_dev_offer(void *d, struct zwp_primary_selection_device_v1 *dev,
+                           struct zwp_primary_selection_offer_v1 *id) {
+    (void)d; (void)dev; (void)id;
+}
+static void prim_dev_selection(void *d, struct zwp_primary_selection_device_v1 *dev,
+                               struct zwp_primary_selection_offer_v1 *id) {
+    (void)d; (void)dev;
+    if (g_prim_offer) zwp_primary_selection_offer_v1_destroy(g_prim_offer);
+    g_prim_offer = id;
+}
+static const struct zwp_primary_selection_device_v1_listener g_prim_dev_listener = {
+    .data_offer = prim_dev_offer,
+    .selection  = prim_dev_selection,
+};
+
 static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps) {
     (void)data;
     if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !g_keyboard) {
@@ -397,6 +538,12 @@ static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps) {
     if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !g_touch) {
         g_touch = wl_seat_get_touch(seat);
         wl_touch_add_listener(g_touch, &g_touch_listener, NULL);
+    }
+    if (g_prim_mgr && g_seat && !g_prim_dev) {
+        g_prim_dev = zwp_primary_selection_device_manager_v1_get_device(g_prim_mgr, g_seat);
+        if (g_prim_dev) {
+            zwp_primary_selection_device_v1_add_listener(g_prim_dev, &g_prim_dev_listener, NULL);
+        }
     }
 }
 static void seat_name(void *data, struct wl_seat *seat, const char *name) { (void)data;(void)seat;(void)name; }
@@ -417,6 +564,10 @@ static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
         wl_seat_add_listener(g_seat, &g_seat_listener, NULL);
     } else if (strcmp(interface, wl_data_device_manager_interface.name) == 0) {
         g_ddm = wl_registry_bind(reg, name, &wl_data_device_manager_interface, 1);
+    } else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0) {
+        g_deco_mgr = wl_registry_bind(reg, name, &zxdg_decoration_manager_v1_interface, 1);
+    } else if (strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name) == 0) {
+        g_prim_mgr = wl_registry_bind(reg, name, &zwp_primary_selection_device_manager_v1_interface, 1);
     }
 }
 static void registry_remove(void *data, struct wl_registry *reg, uint32_t name) { (void)data;(void)reg;(void)name; }
@@ -464,6 +615,18 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
         aid[app_id.len] = '\0';
     }
     xdg_toplevel_set_app_id(g_toplevel, aid);
+
+    if (g_deco_mgr && g_toplevel) {
+        g_toplevel_deco = zxdg_decoration_manager_v1_get_toplevel_decoration(g_deco_mgr, g_toplevel);
+        if (g_toplevel_deco) {
+            zxdg_toplevel_decoration_v1_add_listener(g_toplevel_deco, &g_deco_listener, NULL);
+            if (g_deco_pref == 1) {
+                zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+            } else if (g_deco_pref == 2) {
+                zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+            }
+        }
+    }
 
     wl_surface_commit(g_surface);
     wl_display_roundtrip(g_display);
@@ -527,6 +690,53 @@ int32_t goot_wl_height(void)      { return g_height; }
 int32_t goot_wl_scale(void)       { return g_scale; }
 bool    goot_wl_frame_ready(void) { return g_frame_ready; }
 
+int32_t goot_wl_is_maximized(void)  { return g_is_maximized ? 1 : 0; }
+int32_t goot_wl_is_fullscreen(void) { return g_is_fullscreen ? 1 : 0; }
+int32_t goot_wl_is_activated(void)  { return g_is_activated ? 1 : 0; }
+
+int32_t goot_wl_is_csd(void) {
+    if (g_deco_pref == 3) return 0; /* none */
+    if (g_is_fullscreen) return 0;  /* fullscreen has no decorations */
+    if (g_deco_pref == 2) return 1; /* forced client */
+    if (g_deco_pref == 1 && g_negotiated_deco == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE) return 0;
+    if (g_negotiated_deco == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE) return 0;
+    return 1;
+}
+
+void goot_wl_set_decoration_mode(int32_t pref) {
+    g_deco_pref = pref;
+    if (g_toplevel_deco) {
+        if (pref == 1) {
+            zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+        } else if (pref == 2) {
+            zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+        } else if (pref == 0) {
+            zxdg_toplevel_decoration_v1_unset_mode(g_toplevel_deco);
+        }
+    }
+}
+
+void goot_wl_toplevel_move(void) {
+    if (g_toplevel && g_seat && g_last_serial > 0) {
+        xdg_toplevel_move(g_toplevel, g_seat, g_last_serial);
+    }
+}
+
+void goot_wl_toplevel_minimize(void) {
+    if (g_toplevel) {
+        xdg_toplevel_set_minimized(g_toplevel);
+    }
+}
+
+void goot_wl_toplevel_toggle_maximize(void) {
+    if (!g_toplevel) return;
+    if (g_is_maximized) {
+        xdg_toplevel_unset_maximized(g_toplevel);
+    } else {
+        xdg_toplevel_set_maximized(g_toplevel);
+    }
+}
+
 int32_t goot_wl_clipboard_set(goot_const_bytes_t text) {
     if (!g_ddm || !g_data_dev || !text.data || text.len <= 0) return -1;
     int64_t n = text.len > GOOT_CLIP_MAX ? GOOT_CLIP_MAX : text.len;
@@ -580,10 +790,52 @@ int32_t goot_wl_primary_set(goot_const_bytes_t text) {
     int64_t n = text.len > GOOT_CLIP_MAX ? GOOT_CLIP_MAX : text.len;
     memcpy(g_primary_buf, text.data, (size_t)n);
     g_primary_len = n;
+
+    if (g_prim_mgr && g_prim_dev) {
+        if (g_prim_src) {
+            zwp_primary_selection_source_v1_destroy(g_prim_src);
+            g_prim_src = NULL;
+        }
+        g_prim_src = zwp_primary_selection_device_manager_v1_create_source(g_prim_mgr);
+        if (g_prim_src) {
+            zwp_primary_selection_source_v1_add_listener(g_prim_src, &g_prim_source_listener, NULL);
+            zwp_primary_selection_source_v1_offer(g_prim_src, "text/plain;charset=utf-8");
+            zwp_primary_selection_source_v1_offer(g_prim_src, "text/plain");
+            zwp_primary_selection_source_v1_offer(g_prim_src, "UTF8_STRING");
+            zwp_primary_selection_device_v1_set_selection(g_prim_dev, g_prim_src, g_last_serial);
+            wl_display_flush(g_display);
+        }
+    }
     return 0;
 }
 
 int32_t goot_wl_primary_request(void) {
+    if (g_prim_offer && g_display) {
+        int fds[2];
+        if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) == 0) {
+            zwp_primary_selection_offer_v1_receive(g_prim_offer, "text/plain;charset=utf-8", fds[1]);
+            close(fds[1]);
+            wl_display_flush(g_display);
+
+            g_primary_len = 0;
+            for (int retry = 0; retry < 5 && g_primary_len < GOOT_CLIP_MAX; retry++) {
+                ssize_t n = read(fds[0], g_primary_buf + g_primary_len, (size_t)(GOOT_CLIP_MAX - g_primary_len));
+                if (n > 0) {
+                    g_primary_len += (int64_t)n;
+                } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    struct timespec ts = { 0, 2000000 }; /* 2ms */
+                    nanosleep(&ts, NULL);
+                } else {
+                    break;
+                }
+            }
+            close(fds[0]);
+            if (g_primary_len > 0) {
+                push_ev3(GOOT_EV_PRIMARY_DATA, (int32_t)g_primary_len, 0, 0);
+                return (int32_t)g_primary_len;
+            }
+        }
+    }
     if (g_primary_len > 0) {
         push_ev3(GOOT_EV_PRIMARY_DATA, (int32_t)g_primary_len, 0, 0);
         return (int32_t)g_primary_len;
@@ -601,6 +853,14 @@ int64_t goot_wl_primary_read(goot_bytes_t out_buf) {
 void goot_wl_close(void) {
     destroy_shm_buffer(&g_bufs[0]);
     destroy_shm_buffer(&g_bufs[1]);
+    if (g_cursor_surface) { wl_surface_destroy(g_cursor_surface); g_cursor_surface = NULL; }
+    if (g_cursor_theme)   { wl_cursor_theme_destroy(g_cursor_theme); g_cursor_theme = NULL; }
+    if (g_prim_src)       { zwp_primary_selection_source_v1_destroy(g_prim_src); g_prim_src = NULL; }
+    if (g_prim_offer)     { zwp_primary_selection_offer_v1_destroy(g_prim_offer); g_prim_offer = NULL; }
+    if (g_prim_dev)       { zwp_primary_selection_device_v1_destroy(g_prim_dev); g_prim_dev = NULL; }
+    if (g_prim_mgr)       { zwp_primary_selection_device_manager_v1_destroy(g_prim_mgr); g_prim_mgr = NULL; }
+    if (g_toplevel_deco)  { zxdg_toplevel_decoration_v1_destroy(g_toplevel_deco); g_toplevel_deco = NULL; }
+    if (g_deco_mgr)       { zxdg_decoration_manager_v1_destroy(g_deco_mgr); g_deco_mgr = NULL; }
     if (g_frame_cb)   { wl_callback_destroy(g_frame_cb); g_frame_cb = NULL; }
     if (g_clip_src)   { wl_data_source_destroy(g_clip_src); g_clip_src = NULL; }
     if (g_clip_offer) { wl_data_offer_destroy(g_clip_offer); g_clip_offer = NULL; }
