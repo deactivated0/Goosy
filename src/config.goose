@@ -16,12 +16,12 @@ let DECO_CLIENT = 2;
 let DECO_NONE   = 3;
 
 struct Config {
-    font_family: u8[..128] = "monospace",
-    font_size: i32 = 11,
+    font_family: u8[..128] = "JetBrains Mono",
+    font_size: i32 = 10,
     line_spacing: i32 = 0,
-    padding: i32 = 8,
-    initial_cols: i32 = 110,
-    initial_rows: i32 = 32,
+    padding: i32 = 4,
+    initial_cols: i32 = 120,
+    initial_rows: i32 = 42,
     title: u8[..128] = "Goot",
     cursor_style: i32 = 0,
     scrollback_lines: i32 = 4000,
@@ -30,7 +30,7 @@ struct Config {
     url_label_letters: u8[..64] = "sadfjklewcmpgh",
     title_bar: bool = true,
     title_bar_height: i32 = 28,
-    decorations: i32 = 0, // 0=auto, 1=server, 2=client, 3=none
+    decorations: i32 = DECO_CLIENT, // 0=auto, 1=server, 2=client, 3=none
     palette: colors::Palette = colors::Palette { .. },
 }
 

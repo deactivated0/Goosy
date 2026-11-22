@@ -62,7 +62,7 @@ static struct wl_callback            *g_frame_cb   = NULL;
 
 static struct zxdg_decoration_manager_v1        *g_deco_mgr        = NULL;
 static struct zxdg_toplevel_decoration_v1       *g_toplevel_deco   = NULL;
-static int32_t                                   g_deco_pref       = 0; /* 0=auto, 1=server, 2=client, 3=none */
+static int32_t                                   g_deco_pref       = 2; /* 0=auto, 1=server, 2=client, 3=none */
 static uint32_t                                  g_negotiated_deco = 0;
 
 static struct zwp_primary_selection_device_manager_v1 *g_prim_mgr   = NULL;
@@ -622,7 +622,7 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
             zxdg_toplevel_decoration_v1_add_listener(g_toplevel_deco, &g_deco_listener, NULL);
             if (g_deco_pref == 1) {
                 zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-            } else if (g_deco_pref == 2) {
+            } else {
                 zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
             }
         }
@@ -697,9 +697,7 @@ int32_t goot_wl_is_activated(void)  { return g_is_activated ? 1 : 0; }
 int32_t goot_wl_is_csd(void) {
     if (g_deco_pref == 3) return 0; /* none */
     if (g_is_fullscreen) return 0;  /* fullscreen has no decorations */
-    if (g_deco_pref == 2) return 1; /* forced client */
     if (g_deco_pref == 1 && g_negotiated_deco == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE) return 0;
-    if (g_negotiated_deco == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE) return 0;
     return 1;
 }
 
@@ -708,10 +706,8 @@ void goot_wl_set_decoration_mode(int32_t pref) {
     if (g_toplevel_deco) {
         if (pref == 1) {
             zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-        } else if (pref == 2) {
+        } else if (pref == 0 || pref == 2) {
             zxdg_toplevel_decoration_v1_set_mode(g_toplevel_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
-        } else if (pref == 0) {
-            zxdg_toplevel_decoration_v1_unset_mode(g_toplevel_deco);
         }
     }
 }

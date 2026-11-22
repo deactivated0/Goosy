@@ -111,7 +111,7 @@ fn apply_dec_private_mode(s: screen::Screen&, mode: i32, enable: bool) {
     match mode {
         1 => { s.app_cursor = enable; },
         6 => { s.origin_mode = enable; screen::set_cursor(s, 0, if enable { s.scroll_top } else { 0 }); },
-        7 => { s.autowrap = enable; },
+        7 => { s.autowrap = enable; if !enable { s.wrap_pending = false; } },
         25 => { s.cursor_visible = enable; screen::mark_row_dirty(s, s.cy); },
         47, 1047 => {
             if enable { screen::enter_alt_screen(s, false, false); }
