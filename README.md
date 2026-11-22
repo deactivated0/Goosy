@@ -1,47 +1,124 @@
-# Goosy 🪿
+# <p align="center"><img src="assets/goosy.png" alt="Goosy Logo" width="130" height="130"></p>
+
+<h1 align="center">Goosy 🪿</h1>
+
+<p align="center">
+  <strong>Ultra-fast, lightweight, zero-overhead native Wayland terminal emulator engineered in Goose & C99</strong>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
+  <a href="https://github.com/aardappel/goose"><img src="https://img.shields.io/badge/Language-Goose-orange.svg?style=flat-square" alt="Goose Language"></a>
+  <img src="https://img.shields.io/badge/C-C99-00599C.svg?style=flat-square" alt="C99">
+  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Wayland-informational.svg?style=flat-square" alt="Wayland Platform">
+  <img src="https://img.shields.io/badge/Binary%20Size-~300%20KB-success.svg?style=flat-square" alt="Binary Size ~300 KB">
+  <img src="https://img.shields.io/badge/Cold%20Start-46.1%20ms-success.svg?style=flat-square" alt="Cold Start 46.1 ms">
+  <img src="https://img.shields.io/badge/Idle%20CPU-0.0%25%20(0%20ticks)-success.svg?style=flat-square" alt="Zero Idle CPU">
+</p>
+
+<p align="center">
+  <a href="#visual-showcase">Visual Showcase</a> &bull;
+  <a href="#why-goosy">Why Goosy?</a> &bull;
+  <a href="#empirical-benchmarks">Empirical Benchmarks</a> &bull;
+  <a href="#architectural-highlights">Architecture</a> &bull;
+  <a href="#build--installation">Installation</a> &bull;
+  <a href="#keyboard--mouse-shortcuts">Keybindings</a> &bull;
+  <a href="#configuration">Configuration</a> &bull;
+  <a href="#semantic-shell-integration-osc-133">Shell Integration</a> &bull;
+  <a href="#license">License</a>
+</p>
+
+---
 
 **Goosy** (also known as `goot`) is an ultra-fast, lightweight, zero-overhead native Wayland terminal emulator designed for high-performance Linux workflows. 
 
-Engineered primarily in the [Goose programming language](https://aardappel.github.io/goose/) by Wouter van Oortmerssen ([aardappel/goose](https://github.com/aardappel/goose)), Goosy couples a memory-safe, expressive high-level terminal state machine with an auditable, minimal C99 systems substrate for direct Linux POSIX PTY, `epoll`/`signalfd`, native Wayland client protocols (`xdg-shell`, `zxdg_decoration_manager_v1`, `zwp_primary_selection_device_manager_v1`, `wp_fractional_scale_v1`), FreeType2/Fontconfig/HarfBuzz font rasterization, and Pixman software composition.
+Engineered in the [Goose programming language](https://aardappel.github.io/goose/) by Wouter van Oortmerssen ([aardappel/goose](https://github.com/aardappel/goose)), Goosy couples a memory-safe, expressive terminal state machine with an auditable, minimal C99 systems substrate for direct Linux POSIX PTY, `epoll`/`signalfd`, native Wayland client protocols (`xdg-shell`, `zxdg_decoration_manager_v1`, `zwp_primary_selection_device_manager_v1`, `wp_fractional_scale_v1`), FreeType2/Fontconfig/HarfBuzz font rasterization, and Pixman software composition.
 
 ---
 
 ## Visual Showcase
 
 <p align="center">
-  <img src="assets/screenshots/goosy_main.png" alt="Goosy Fastfetch System Showcase" width="49%">
+  <img src="assets/screenshots/goosy_main.png" alt="Goosy Fastfetch & System Showcase" width="49%">
   <img src="assets/screenshots/goosy_colors.png" alt="Goosy 24-bit Truecolor & Procedural Glyph Rendering" width="49%">
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/goosy_code.png" alt="Goosy Code Editing" width="70%">
+  <img src="assets/screenshots/goosy_code.png" alt="Goosy Neovim Code Editing & HarfBuzz Ligatures" width="49%">
+  <img src="assets/screenshots/goosy_fastfetch.png" alt="Goosy Procedural Box & Block Elements" width="49%">
 </p>
 
 ---
 
-## Empirical Benchmarks: Goosy vs Competitors
+## Why Goosy?
 
-Measured directly under Linux 7.3.4 (x86_64) on a native Wayland compositor. Measurements recorded after settling, using `/proc/$PID/smaps_rollup` (RSS & PSS), `/proc/$PID/stat` (CPU ticks), wall-clock cold startup with `true`, and 5 MB streaming throughput.
+- ⚡ **Blazing Startup (< 47 ms) & Microscopic Footprint**: Standalone ~300 KB binary. Consumes only 38 MB steady idle RSS (28 MB PSS). Zero Electron, zero Chromium, zero GTK/Qt heavy runtime dependencies.
+- 🪿 **Dual-Language Systems Architecture**: 100% memory-safe Goose terminal state machine and ANSI/VT parser combined with a minimal, auditable C99 Wayland bridge.
+- 🎯 **Mathematical Pixel-Perfect Rendering**: Zero-displacement text selection highlight—cell baselines and character alignments remain 100% invariant between typing and selecting. Procedural box-drawing (`U+2500..U+257F`) and block elements (`U+2580..U+259F`) are drawn with integer coordinates directly in Pixman to avoid font-scaling seams or misalignment in TUIs.
+- 🖼️ **Modern Terminal Graphics**:
+  - **Kitty Graphics Protocol**: RGB, RGBA, and PNG support with multi-packet chunked reassembly (`m=1`/`m=0`), targeted deletion by ID (`a=d, i=<id>`), and bounded memory allocations.
+  - **Sixel Graphics**: Fast software rasterization with strict 4096&times;4096 dimension protection.
+- 🪟 **First-Class Native Wayland Protocols**:
+  - `xdg-shell` client window management.
+  - `zxdg_decoration_manager_v1` negotiation: sleek integrated CSD title bar on compositors without server decorations, and automatic SSD adaptation on `sway`, `labwc`, or `hyprland`.
+  - `zwp_primary_selection_device_manager_v1`: Seamless copy-on-select and middle-click paste without external daemons.
+  - `wp_fractional_scale_v1` & `wp_viewporter`: Crisp HiDPI rendering with decoupled 1:1 buffer scaling.
+- 🐚 **Semantic Shell Integration (OSC 133)**: Prompt boundary markers, prompt navigation jumps (`Ctrl+Shift+Z`/`X`), and one-key command output selection (`Ctrl+Shift+A`).
+- 🔗 **Smart Hyperlinks & URL Picker (OSC 8)**: Clickable URLs with hover feedback and a keyboard-driven Vimium-style URL jump mode (`Ctrl+Shift+O`) that safely opens links with `xdg-open` (no subshell invocation).
+- 🔍 **Interactive Scrollback Search**: Lightning-fast regex and substring search through 4,000+ history lines with live match highlighting and word expansion (`Ctrl+Shift+R`).
+- 📱 **Touchscreen & Gesture Support**: Single-tap click, smooth inertial drag scrolling, and long-press drag selection.
+- 🔒 **Security Hardened by Default**: Dynamically expanding non-blocking PTY write queue (up to 16 MiB), bounded parser parameter limits, strict UTF-8 overlong/surrogate rejection, and safe clipboard sanitization (strips `NUL` and raw `ESC`).
+
+---
+
+## Empirical Benchmarks
+
+Tested under Linux 7.3.4 (`x86_64`) on a native Wayland compositor. Measurements recorded after settling, using `/proc/$PID/smaps_rollup` (RSS & PSS), `/proc/$PID/stat` (CPU ticks), wall-clock cold startup with `true`, and 5 MB streaming throughput.
 
 | Terminal Emulator | Binary Size | Cold Startup | Steady Idle RSS | Steady Idle PSS | Idle CPU (2s) | Stream Throughput | Architecture / UI Toolkit |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
-| **Goosy** (`goot`) | **0.30 MB** | **46.1 ms** | **38.6 MB** | **28.5 MB** | **0 ticks** | **10.4 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
-| **Foot** | 0.48 MB | 50.4 ms | 21.0 MB | 8.0 MB | 0 ticks | 37.6 MB/s | Pure C / Custom Wayland |
-| **Alacritty** | 8.30 MB | 150.3 ms | 94.2 MB | 38.0 MB | 0 ticks | 21.3 MB/s | Rust / OpenGL (winit) |
-| **Kitty** | 0.10 MB* | 260.4 ms | 125.0 MB | 58.0 MB | 0 ticks | 15.1 MB/s | C + Python + OpenGL (*81 MB runtime) |
-| **Konsole** | 0.05 MB* | 266.4 ms | 103.6 MB | 49.9 MB | 0 ticks | 10.3 MB/s | C++ / Qt6 + KDE Frameworks (*10 MB core) |
+| **Goosy** (`goot`) | **0.30 MB** | **46.1 ms** | **38.6 MB** | **28.5 MB** | **0 ticks (0%)** | **10.4 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
+| **Foot** | 0.48 MB | 50.4 ms | 21.0 MB | 8.0 MB | 0 ticks (0%) | 37.6 MB/s | Pure C / Custom Wayland |
+| **Alacritty** | 8.30 MB | 150.3 ms | 94.2 MB | 38.0 MB | 0 ticks (0%) | 21.3 MB/s | Rust / OpenGL (winit) |
+| **Kitty** | 0.10 MB* | 260.4 ms | 125.0 MB | 58.0 MB | 0 ticks (0%) | 15.1 MB/s | C + Python + OpenGL (*81 MB runtime) |
+| **Konsole** | 0.05 MB* | 266.4 ms | 103.6 MB | 49.9 MB | 0 ticks (0%) | 10.3 MB/s | C++ / Qt6 + KDE Frameworks (*10 MB core) |
 
 *\*Note: Kitty and Konsole binary sizes reflect dynamic launcher stubs; their installed package footprints require 81.35 MiB and 10.51 MiB of runtime libraries respectively. Goosy is a fully self-contained ~300 KB standalone executable.*
 
-### Internal Microbenchmarks
+### Microbenchmarks
 
-- **Font Glyph Cache Lookups**: **71,428,571 lookups/s** (1,000,000 lookups completed in 14 ms).
-- **Full-Frame Cell Composite Rate**: **751.9 FPS** (100 full frames of 120×40 cells / 480,000 cells composited in 133 ms; ~3,609,022 cells/s).
-- **History Scrollback Throughput**: **30,921 lines/s** (50,000 line scrollback operations in 1,617 ms — **2.40x performance improvement**).
+- ⚡ **Font Glyph Cache Lookups**: **71,428,571 lookups/s** (1,000,000 lookups completed in 14 ms).
+- 🖼️ **Full-Frame Cell Composite Rate**: **751.9 FPS** (100 full frames of 120&times;40 cells / 480,000 cells composited in 133 ms; ~3,609,022 cells/s).
+- 📜 **History Scrollback Throughput**: **30,921 lines/s** (50,000 line scrollback operations in 1,617 ms &mdash; **2.40&times; performance improvement**).
 
 ---
 
 ## Architectural Highlights
+
+```
++-----------------------------------------------------------------------------------------+
+|                                   Goot (Goose Core)                                     |
+|  goot.goose: Event loop orchestration, PTY batching, resize & input routing             |
+|  src/parser.goose   -> VT100/VT220/ECMA-48 state machine                                |
+|  src/screen.goose   -> Root struct Screen (active cells, alt screen, scrollback buffer) |
+|  src/utf8.goose     -> Streaming UTF-8 decoder + WCWidth combining mark calculation     |
+|  src/colors.goose   -> 16/256/24-bit Truecolor palette + hex parser                     |
+|  src/input.goose    -> Keysym -> VT sequences, shortcuts, mouse tracking, paste filter |
+|  src/config.goose   -> Zero-heap INI configuration parser                               |
+|  src/renderer.goose -> Per-row dirty damage tracking and composite coordinator          |
++-----------------------------------------------------------------------------------------+
+                                    |  src/ffi.goose (extern fn, {data, len})
++-----------------------------------------------------------------------------------------+
+|                               Minimal C99 Bridge (native/)                              |
+|  goot_pty.c     -> Linux POSIX PTY (openpty, forkpty, TIOCSWINSZ, dynamic FIFO buffer)  |
+|  goot_poll.c    -> epoll + signalfd (zero busy-wait idle loop, SIGCHLD handling)        |
+|  goot_wayland.c -> Wayland client (xdg-shell, CSD/SSD, wl_shm, primary selection)       |
+|  goot_xkb.c     -> libxkbcommon keymap & compose sequence UTF-8 translation             |
+|  goot_font.c    -> FreeType2 + Fontconfig + HarfBuzz shaping + LRU glyph cache          |
+|  goot_render.c  -> Pixman software composition + damage bounding rectangle union        |
+|  goot_image.c   -> Kitty graphics chunked reassembly & Sixel decoding engine            |
++-----------------------------------------------------------------------------------------+
+```
 
 ### 1. Dual-Language Systems Architecture
 - **Goose Terminal State Core**: High-level terminal state transitions, UTF-8 parsing, ANSI/VT escape sequence parsing, scrollback ring buffers, hyperlink tracking, and keyboard/touch input translation execute with zero-overhead memory safety in Goose.
@@ -60,17 +137,34 @@ Measured directly under Linux 7.3.4 (x86_64) on a native Wayland compositor. Mea
 ### 4. Zero-Idle-CPU Event Pipeline
 - Blocks completely on Linux `epoll_wait(-1)` when idle.
 - Samples zero CPU cycles and zero scheduler wakeups when no PTY or Wayland activity is occurring.
-- 64 KiB outgoing write ring buffer with dynamic `EPOLLOUT` notifications prevents PTY write bottlenecks.
+- 64 KiB initial outgoing write ring buffer with dynamic growable FIFO (up to 16 MiB) and `EPOLLOUT` notifications prevents PTY write bottlenecks.
 
 ---
 
-## Prerequisites (Arch Linux / Artix Linux x86_64)
+## Prerequisites
 
-1. The [Goose programming language compiler](https://github.com/aardappel/goose) (`goose` in `PATH`).
-2. Required development libraries:
-
+### Arch Linux / Artix Linux
 ```sh
-sudo pacman -S --needed base-devel pkgconf wayland wayland-protocols wayland-cursor pixman freetype2 fontconfig harfbuzz libxkbcommon libpng
+# 1. Install required system development libraries
+sudo pacman -S --needed base-devel pkgconf wayland wayland-protocols \
+    wayland-cursor pixman freetype2 fontconfig harfbuzz libxkbcommon libpng
+
+# 2. Install the Goose programming language compiler
+# Ensure `goose` binary is in your PATH (from https://github.com/aardappel/goose)
+```
+
+### Fedora / RHEL
+```sh
+sudo dnf install gcc pkgconf-pkg-config wayland-devel wayland-protocols-devel \
+    libwayland-cursor-devel pixman-devel freetype-devel fontconfig-devel \
+    harfbuzz-devel libxkbcommon-devel libpng-devel
+```
+
+### Debian / Ubuntu
+```sh
+sudo apt install build-essential pkg-config libwayland-dev wayland-protocols \
+    libwayland-cursor++0 libpixman-1-dev libfreetype6-dev libfontconfig1-dev \
+    libharfbuzz-dev libxkbcommon-dev libpng-dev
 ```
 
 ---
@@ -78,67 +172,99 @@ sudo pacman -S --needed base-devel pkgconf wayland wayland-protocols wayland-cur
 ## Build & Installation
 
 ```sh
-# 1. Generate Wayland protocol bindings, typecheck Goose sources, and compile native executable
+# 1. Clone the repository
+git clone https://github.com/deactivated0/Goosy.git
+cd Goosy
+
+# 2. Build Goosy (generates Wayland protocols, verifies Goose sources, and compiles binary)
 ./scripts/build.sh
 
-# 2. Run directly inside any Wayland session
+# 3. Test Goosy immediately in your Wayland session
 ./build/goosy
 
-# 3. Rootless local user installation (~/.local/bin/goosy, ~/.local/bin/goot, man goosy.ini)
+# 4. Install for current user (~/.local/bin/goosy, desktop launcher, icons, man pages)
 ./scripts/install.sh
 
-# 4. Clean uninstallation
+# 5. Clean uninstallation anytime
 ./scripts/uninstall.sh
 ```
 
 ---
 
-## Shortcut Reference
+## Compositor Integration
 
-Configuration options and keybindings can be customized in `~/.config/goosy/goosy.ini` (see `man goosy.ini`).
+Add a quick keybinding to your Wayland window manager or compositor configuration:
 
-### Keyboard Navigation & Commands
+#### Hyprland (`~/.config/hypr/hyprland.conf`)
+```ini
+bind = $mainMod, Return, exec, goosy
+```
+
+#### Sway / i3 (`~/.config/sway/config`)
+```ini
+bindsym $mod+Return exec goosy
+```
+
+#### River (`~/.config/river/init`)
+```sh
+riverctl map normal Super Return spawn goosy
+```
+
+#### Labwc (`~/.config/labwc/rc.xml`)
+```xml
+<keybind key="W-Return">
+  <action name="Execute" command="goosy"/>
+</keybind>
+```
+
+---
+
+## Keyboard & Mouse Shortcuts
+
+Configuration options and keybindings can be fully customized in `~/.config/goosy/goosy.ini` (see `man goosy.ini`).
+
+### Navigation & Commands
 | Keybinding | Action |
 |:---|:---|
-| `Shift + PageUp` / `Shift + PageDown` | Scroll up / down through history |
-| `Ctrl + Shift + C`, `XF86Copy` | Copy selection to system clipboard |
-| `Ctrl + Shift + V`, `XF86Paste` | Paste from system clipboard |
-| `Shift + Insert` | Paste from primary selection |
+| `Shift + PageUp` / `Shift + PageDown` | Scroll viewport up / down through history |
+| `Ctrl + Shift + C`, `XF86Copy` | Copy current selection to system clipboard |
+| `Ctrl + Shift + V`, `XF86Paste` | Paste text from system clipboard |
+| `Shift + Insert` | Paste text from primary selection |
 | `Ctrl + Shift + R` | Open interactive scrollback search mode |
-| `Ctrl + +`, `Ctrl + =` | Increase font size |
-| `Ctrl + -` | Decrease font size |
+| `Ctrl + +`, `Ctrl + =` | Increase font size (zoom in) |
+| `Ctrl + -` | Decrease font size (zoom out) |
 | `Ctrl + 0` | Reset font size to default |
 | `Ctrl + Shift + N` | Spawn new terminal window in current working directory (via OSC 7) |
 | `Ctrl + Shift + O` | Enter URL jump picker mode |
 | `Ctrl + Shift + U` | Enter Unicode hexadecimal code point entry mode |
-| `Ctrl + Shift + Z` / `Ctrl + Shift + X` | Jump to previous / next prompt mark (OSC 133 integration) |
-| `Ctrl + Shift + A` | Select and copy entire output of last command to clipboard (OSC 133 integration) |
+| `Ctrl + Shift + Z` / `Ctrl + Shift + X` | Jump to previous / next prompt mark (OSC 133 semantic shell integration) |
+| `Ctrl + Shift + A` | Select and copy entire output of last command to clipboard (OSC 133) |
 
 ### Interactive Scrollback Search Mode
 | Keybinding | Action |
 |:---|:---|
 | `Ctrl + R` / `Ctrl + S` | Step search backward / forward |
-| `Ctrl + W` | Extend selection / search to end of word |
+| `Ctrl + W` | Extend selection / search to end of current word |
 | `Ctrl + Shift + W` | Extend selection to next whitespace boundary |
-| `Ctrl + V`, `Ctrl + Shift + V`, `Ctrl + Y` | Paste clipboard into search query |
+| `Ctrl + V`, `Ctrl + Shift + V`, `Ctrl + Y` | Paste clipboard contents into search query |
 | `Shift + Insert` | Paste primary selection into search query |
-| `Escape`, `Ctrl + G` | Cancel search and return to terminal |
+| `Escape`, `Ctrl + G` | Cancel search and return to terminal viewport |
 | `Return` | Commit search match and copy to primary selection |
 
-### URL Jump Mode
+### URL Jump Mode (`Ctrl + Shift + O`)
 | Keybinding | Action |
 |:---|:---|
-| `[Key label]` | Open identified URL via system default browser (`xdg-open`) |
+| `[Key label]` | Open identified link via system default browser (`xdg-open`) |
 | `t` | Toggle URL text display inside labels |
-| `Escape`, `Ctrl + C`, `Ctrl + G` | Exit URL mode |
+| `Escape`, `Ctrl + C`, `Ctrl + G` | Exit URL jump picker mode |
 
 ### Mouse & Window Interactions
 | Interaction | Action |
 |:---|:---|
-| `Title bar drag` | Move window across workspace |
+| `Title bar drag` | Move window across workspace (CSD mode) |
 | `Title bar double-click` | Toggle maximize / restore window state |
 | `Title bar buttons` | Minimize, Maximize / Restore, Close |
-| `Left click + drag` | Select text (copies to primary selection on release; hold `Shift` to override client mouse tracking; hold `Ctrl` for block selection) |
+| `Left click + drag` | Select text (copies to primary selection on release; hold `Shift` to override client mouse tracking; hold `Ctrl` for rectangular block selection) |
 | `Left double-click` | Select word (hold `Ctrl` for whitespace-only word boundary) |
 | `Left triple-click` | Select inside enclosing quotes (`"`, `'`, `` ` ``) or full line |
 | `Left quad-click` | Select full line |
@@ -150,12 +276,14 @@ Configuration options and keybindings can be customized in `~/.config/goosy/goos
 | Gesture | Action |
 |:---|:---|
 | `Single Tap` | Emulates mouse left click |
-| `Drag` | Smoothly scrolls viewport history |
+| `Drag` | Smooth kinetic scrolling through viewport history |
 | `Long-Press + Drag` | Emulates mouse text selection drag |
 
 ---
 
-## Configuration Reference (`~/.config/goosy/goosy.ini`)
+## Configuration
+
+Goosy reads configuration from `~/.config/goosy/goosy.ini`. If the file does not exist, standard defaults are applied.
 
 ```ini
 [main]
@@ -200,9 +328,37 @@ bright7  = FFFFFF
 long-press-delay = 400      # Milliseconds before long-press drag selection triggers
 ```
 
+For full option details and syntax rules, consult `man 5 goosy.ini`.
+
+---
+
+## Semantic Shell Integration (OSC 133)
+
+Goosy natively supports **OSC 133** semantic prompt markers. Adding markers enables `Ctrl+Shift+Z`/`X` to jump directly between command prompts and `Ctrl+Shift+A` to copy an entire command's output cleanly:
+
+### Bash (`~/.bashrc`)
+```bash
+PS1='\[\e]133;A\e\\\]'$PS1'\[\e]133;B\e\\\]'
+```
+
+### Zsh (`~/.zshrc`)
+```zsh
+precmd() { print -Pn "\e]133;A\a" }
+preexec() { print -Pn "\e]133;C\a" }
+```
+
+### Fish (`~/.config/fish/config.fish`)
+```fish
+function mark_prompt --on-event fish_prompt
+    printf "\e]133;A\e\\"
+end
+```
+
 ---
 
 ## Testing & Quality Assurance
+
+Goosy includes an extensive test suite covering unit correctness, C99 POSIX bridges, security boundaries, and benchmark regression:
 
 ```sh
 # 1. Native POSIX PTY + epoll/signalfd + URL security validation
@@ -213,14 +369,22 @@ gcc -O2 -Wall -Wextra -Werror -std=c99 -Inative \
 # 2. Complete Goose terminal engine test suite
 cd tests && goose run test_goot.goose
 
-# 3. Automated cross-terminal benchmark harness
+# 3. Security fuzzing & image boundary tests
+gcc -O2 -Wall -Wextra -std=c99 -Inative \
+    native/goot_image.c native/goot_render.c tests/test_security_fuzz.c \
+    $(pkg-config --cflags --libs pixman-1 libpng) \
+    -o /tmp/test_security_fuzz && /tmp/test_security_fuzz
+
+# 4. Automated cross-terminal benchmark harness
 python3 benchmarks/comprehensive_benchmarks.py
 ```
 
 ---
 
-## License
+## License & Acknowledgments
 
-Goosy is distributed under the MIT License. See [LICENSE](LICENSE) for details.
-All native Wayland protocols are copyrighted by their respective protocol authors.
-Goose programming language is &copy; Wouter van Oortmerssen.
+Goosy is free and open-source software distributed under the [MIT License](LICENSE).
+
+- **Goose Programming Language**: Copyright &copy; Wouter van Oortmerssen ([aardappel/goose](https://github.com/aardappel/goose)).
+- **Wayland Protocols**: Copyright &copy; respective protocol authors.
+- **Rendering Libraries**: Powered by [Pixman](http://pixman.org/), [FreeType 2](https://freetype.org/), and [HarfBuzz](https://harfbuzz.github.io/).
