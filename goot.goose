@@ -135,8 +135,8 @@ fn main() {
     let init_w  = init_cols * init_cw + 2 * cfg.padding;
     let init_h  = init_rows * init_ch + 2 * cfg.padding + init_title_h;
 
-    guard ffi::wl_init(cfg.title, "goot", init_w, init_h) == 0 else {
-        print("goot: failed to initialize Wayland display (is WAYLAND_DISPLAY set?)");
+    guard ffi::wl_init(cfg.title, "goosy", init_w, init_h) == 0 else {
+        print("goosy: failed to initialize Wayland display (is WAYLAND_DISPLAY set?)");
         exit(1);
     }
     defer ffi::wl_close();
@@ -151,13 +151,13 @@ fn main() {
     var mstate = modes::new_state();
 
     guard ffi::pty_spawn("", "xterm-256color", scr.cols, scr.rows, init_cols * init_cw, init_rows * init_ch) == 0 else {
-        print("goot: failed to spawn PTY shell");
+        print("goosy: failed to spawn PTY shell");
         exit(1);
     }
     defer ffi::pty_close();
 
     guard ffi::poll_init(ffi::wl_fd(), ffi::pty_fd()) == 0 else {
-        print("goot: failed to initialize epoll loop");
+        print("goosy: failed to initialize epoll loop");
         exit(1);
     }
     defer ffi::poll_close();

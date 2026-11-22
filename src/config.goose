@@ -22,7 +22,7 @@ struct Config {
     padding: i32 = 4,
     initial_cols: i32 = 120,
     initial_rows: i32 = 42,
-    title: u8[..128] = "Goot",
+    title: u8[..128] = "Goosy",
     cursor_style: i32 = 0,
     scrollback_lines: i32 = 4000,
     allow_osc52: bool = false,
@@ -259,31 +259,55 @@ fn try_load_path(cfg: Config&, path: const u8[:]) -> bool {
     return false;
 }
 
-// Load ~/.config/goot/goot.ini (or fallback goot.toml).
+// Load ~/.config/goosy/goosy.ini (or fallback goot.ini, goosy.toml, goot.toml).
 fn load_user_config() -> Config {
     var cfg = default_config();
     var env_buf: u8[512] = [0; 512];
-    var base: u8[>..] = [];
+    var base_goosy: u8[>..] = [];
+    var base_legacy: u8[>..] = [];
 
     let xdg_len = ffi::env_get("XDG_CONFIG_HOME", env_buf);
     if xdg_len > 0 {
-        base.append(env_buf[..xdg_len]);
-        base.append("/goot/");
+        base_goosy.append(env_buf[..xdg_len]);
+        base_goosy.append("/goosy/");
+        base_legacy.append(env_buf[..xdg_len]);
+        base_legacy.append("/goot/");
     } else {
         let home_len = ffi::env_get("HOME", env_buf);
         if home_len <= 0 { return cfg; }
-        base.append(env_buf[..home_len]);
-        base.append("/.config/goot/");
+        base_goosy.append(env_buf[..home_len]);
+        base_goosy.append("/.config/goosy/");
+        base_legacy.append(env_buf[..home_len]);
+        base_legacy.append("/.config/goot/");
     }
 
+    // 1. Try ~/.config/goosy/goosy.ini
     var p_ini: u8[>..] = [];
-    p_ini.append(base);
-    p_ini.append("goot.ini");
+    p_ini.append(base_goosy);
+    p_ini.append("goosy.ini");
     if try_load_path(cfg, p_ini) { return cfg; }
 
+    // 2. Try ~/.config/goosy/config.ini
+    var p_cfg: u8[>..] = [];
+    p_cfg.append(base_goosy);
+    p_cfg.append("config.ini");
+    if try_load_path(cfg, p_cfg) { return cfg; }
+
+    // 3. Try legacy ~/.config/goot/goot.ini
+    var p_leg_ini: u8[>..] = [];
+    p_leg_ini.append(base_legacy);
+    p_leg_ini.append("goot.ini");
+    if try_load_path(cfg, p_leg_ini) { return cfg; }
+
+    // 4. Try TOML fallbacks
     var p_toml: u8[>..] = [];
-    p_toml.append(base);
-    p_toml.append("goot.toml");
-    let _ = try_load_path(cfg, p_toml);
+    p_toml.append(base_goosy);
+    p_toml.append("goosy.toml");
+    if try_load_path(cfg, p_toml) { return cfg; }
+
+    var p_leg_toml: u8[>..] = [];
+    p_leg_toml.append(base_legacy);
+    p_leg_toml.append("goot.toml");
+    let _ = try_load_path(cfg, p_leg_toml);
     return cfg;
 }

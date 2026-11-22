@@ -132,12 +132,14 @@ fn apply_sgr(p: Parser&, s: screen::Screen&, pal: colors::Palette&) {
                 if i + 2 < p.param_count && p.params[i + 1] == 5 {
                     s.cur_ul_color = colors::resolve_256(pal, p.params[i + 2]);
                     i += 2;
-                } else if i + 5 < p.param_count && p.params[i + 1] == 2 {
-                    s.cur_ul_color = colors::pack_rgb(p.params[i + 3] as u32, p.params[i + 4] as u32, p.params[i + 5] as u32);
-                    i += 5;
                 } else if i + 4 < p.param_count && p.params[i + 1] == 2 {
-                    s.cur_ul_color = colors::pack_rgb(p.params[i + 2] as u32, p.params[i + 3] as u32, p.params[i + 4] as u32);
-                    i += 4;
+                    if i + 5 < p.param_count && p.is_subparam[i + 1] && p.is_subparam[i + 2] {
+                        s.cur_ul_color = colors::pack_rgb(p.params[i + 3] as u32, p.params[i + 4] as u32, p.params[i + 5] as u32);
+                        i += 5;
+                    } else {
+                        s.cur_ul_color = colors::pack_rgb(p.params[i + 2] as u32, p.params[i + 3] as u32, p.params[i + 4] as u32);
+                        i += 4;
+                    }
                 }
             },
             59 => {
@@ -151,14 +153,16 @@ fn apply_sgr(p: Parser&, s: screen::Screen&, pal: colors::Palette&) {
                     let rgb = colors::resolve_256(pal, p.params[i + 2]);
                     if is_fg { s.cur_fg = rgb; } else { s.cur_bg = rgb; }
                     i += 2;
-                } else if i + 5 < p.param_count && p.params[i + 1] == 2 {
-                    let rgb = colors::pack_rgb(p.params[i + 3] as u32, p.params[i + 4] as u32, p.params[i + 5] as u32);
-                    if is_fg { s.cur_fg = rgb; } else { s.cur_bg = rgb; }
-                    i += 5;
                 } else if i + 4 < p.param_count && p.params[i + 1] == 2 {
-                    let rgb = colors::pack_rgb(p.params[i + 2] as u32, p.params[i + 3] as u32, p.params[i + 4] as u32);
-                    if is_fg { s.cur_fg = rgb; } else { s.cur_bg = rgb; }
-                    i += 4;
+                    if i + 5 < p.param_count && p.is_subparam[i + 1] && p.is_subparam[i + 2] {
+                        let rgb = colors::pack_rgb(p.params[i + 3] as u32, p.params[i + 4] as u32, p.params[i + 5] as u32);
+                        if is_fg { s.cur_fg = rgb; } else { s.cur_bg = rgb; }
+                        i += 5;
+                    } else {
+                        let rgb = colors::pack_rgb(p.params[i + 2] as u32, p.params[i + 3] as u32, p.params[i + 4] as u32);
+                        if is_fg { s.cur_fg = rgb; } else { s.cur_bg = rgb; }
+                        i += 4;
+                    }
                 }
             },
             _ => {},

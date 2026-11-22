@@ -160,7 +160,7 @@ static int create_shm_buffer(struct goot_shm_buffer *b, int32_t w, int32_t h) {
     size_t size = (size_t)stride * (size_t)h;
     if (size / (size_t)stride != (size_t)h) return -1;
 
-    int fd = memfd_create("goot-shm", MFD_CLOEXEC);
+    int fd = memfd_create("goosy-shm", MFD_CLOEXEC);
     if (fd < 0) return -1;
     if (ftruncate(fd, (off_t)size) < 0) { close(fd); return -1; }
 
@@ -678,7 +678,7 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
     xdg_toplevel_add_listener(g_toplevel, &g_xdg_toplevel_listener, NULL);
 
     goot_wl_set_title(title);
-    char aid[128] = "goot";
+    char aid[128] = "goosy";
     if (app_id.data && app_id.len > 0 && app_id.len < (int64_t)sizeof(aid)) {
         memcpy(aid, app_id.data, (size_t)app_id.len);
         aid[app_id.len] = '\0';

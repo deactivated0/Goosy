@@ -516,9 +516,20 @@ int64_t goot_file_read(goot_const_bytes_t path, goot_bytes_t out_buf) {
 }
 
 /* -------------------------------------------------------------------------
- * Persistent Window Geometry State (~/.local/state/goot/window_geometry)
+ * Persistent Window Geometry State (~/.local/state/goosy/window_geometry)
  * ------------------------------------------------------------------------- */
 static void get_state_geometry_path(char *out, size_t cap) {
+    const char *state_home = getenv("XDG_STATE_HOME");
+    if (state_home && state_home[0] == '/') {
+        snprintf(out, cap, "%s/goosy/window_geometry", state_home);
+    } else {
+        const char *home = getenv("HOME");
+        if (!home || home[0] != '/') home = "/tmp";
+        snprintf(out, cap, "%s/.local/state/goosy/window_geometry", home);
+    }
+}
+
+static void get_legacy_state_geometry_path(char *out, size_t cap) {
     const char *state_home = getenv("XDG_STATE_HOME");
     if (state_home && state_home[0] == '/') {
         snprintf(out, cap, "%s/goot/window_geometry", state_home);
@@ -539,6 +550,10 @@ static void load_state_if_needed(void) {
     char path[1024];
     get_state_geometry_path(path, sizeof(path));
     int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        get_legacy_state_geometry_path(path, sizeof(path));
+        fd = open(path, O_RDONLY | O_CLOEXEC);
+    }
     if (fd < 0) return;
     char buf[64];
     ssize_t n = read(fd, buf, sizeof(buf) - 1);

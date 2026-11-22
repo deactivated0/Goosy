@@ -82,10 +82,11 @@ if [ -f "$VIEWPORT_XML" ]; then
     wayland-scanner private-code  "$VIEWPORT_XML" native/generated/viewporter-protocol.c
 fi
 
-echo "[goot] Typechecking Goose sources (goose check)..."
-goose check goot.goose
+echo "[goosy] Typechecking Goose sources (goose check)..."
+goose check goosy.goose
 
-echo "[goot] Building native executable (goose build -O2)..."
-goose build -O2 -o build/goot goot.goose
+echo "[goosy] Building native executable (goose build -O2)..."
+goose build -O2 -o build/goosy goosy.goose
+ln -sf goosy build/goot
 
-echo "[goot] Build succeeded: $ROOT_DIR/build/goot"
+echo "[goosy] Build succeeded: $ROOT_DIR/build/goosy (and symlinked build/goot)"

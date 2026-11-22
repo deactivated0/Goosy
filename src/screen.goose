@@ -81,7 +81,7 @@ root struct Screen {
 
     full_redraw_frames: i32 = 2,
     title_dirty: bool = false,
-    title: u8[..256] = "Goot",
+    title: u8[..256] = "Goosy",
     cwd: u8[..512] = "",
 
     sb_cap_lines: i32 = 4000,

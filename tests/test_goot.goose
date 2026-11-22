@@ -236,6 +236,12 @@ fn test_agy_escape_sequences_and_state() {
     ffi::state_save_geometry(115, 38);
     assert(ffi::state_load_cols() == 115);
     assert(ffi::state_load_rows() == 38);
+
+    // 6. Compound SGR with 38;2;...;48;2;... (such as agy banner)
+    parser::feed_slice(par, scr, pal, "\x1b[38;2;242;146;46;48;2;246;145;46mX\x1b[m");
+    let c_comp = screen::visible_cell(scr, 5, 2);
+    assert(c_comp.fg == 0xF2922E);
+    assert(c_comp.bg == 0xF6912E);
 }
 
 fn main() {
