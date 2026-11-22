@@ -51,14 +51,7 @@ int32_t goot_render_begin(uint32_t bg_rgb) {
     return 0;
 }
 
-void goot_render_damage(int32_t x, int32_t y, int32_t w, int32_t h) {
-    if (!g_cur_pixels || w <= 0 || h <= 0) return;
-    int32_t x0 = x < 0 ? 0 : x;
-    int32_t y0 = y < 0 ? 0 : y;
-    int32_t x1 = x + w > g_cur_w  ? g_cur_w  : x + w;
-    int32_t y1 = y + h > g_cur_h ? g_cur_h : y + h;
-    if (x0 >= x1 || y0 >= y1) return;
-
+static inline void update_damage(int32_t x0, int32_t y0, int32_t x1, int32_t y1) {
     if (!g_has_dmg) {
         g_dmg_x0 = x0; g_dmg_y0 = y0;
         g_dmg_x1 = x1; g_dmg_y1 = y1;
@@ -69,6 +62,16 @@ void goot_render_damage(int32_t x, int32_t y, int32_t w, int32_t h) {
         if (x1 > g_dmg_x1) g_dmg_x1 = x1;
         if (y1 > g_dmg_y1) g_dmg_y1 = y1;
     }
+}
+
+void goot_render_damage(int32_t x, int32_t y, int32_t w, int32_t h) {
+    if (!g_cur_pixels || w <= 0 || h <= 0) return;
+    int32_t x0 = x < 0 ? 0 : x;
+    int32_t y0 = y < 0 ? 0 : y;
+    int32_t x1 = x + w > g_cur_w  ? g_cur_w  : x + w;
+    int32_t y1 = y + h > g_cur_h ? g_cur_h : y + h;
+    if (x0 >= x1 || y0 >= y1) return;
+    update_damage(x0, y0, x1, y1);
 }
 
 void goot_render_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t rgb) {
@@ -83,13 +86,43 @@ void goot_render_fill_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t 
     int32_t fill_h = y1 - y0;
     uint32_t val = 0xFF000000U | (rgb & 0x00FFFFFFU);
 
-    for (int32_t r = 0; r < fill_h; r++) {
-        uint32_t *row = g_cur_pixels + (y0 + r) * g_cur_stride_words + x0;
-        for (int32_t c = 0; c < fill_w; c++) {
-            row[c] = val;
+    if (x0 == 0 && fill_w == g_cur_stride_words) {
+        size_t total_words = (size_t)fill_w * (size_t)fill_h;
+        uint32_t *dst = g_cur_pixels + (size_t)y0 * (size_t)g_cur_stride_words;
+        uint64_t val64 = ((uint64_t)val << 32) | (uint64_t)val;
+        uint64_t *dst64 = (uint64_t *)dst;
+        size_t count64 = total_words / 2;
+        for (size_t i = 0; i < count64; i++) {
+            dst64[i] = val64;
+        }
+        if (total_words & 1) {
+            dst[total_words - 1] = val;
+        }
+    } else {
+        uint64_t val64 = ((uint64_t)val << 32) | (uint64_t)val;
+        for (int32_t r = 0; r < fill_h; r++) {
+            uint32_t *row = g_cur_pixels + (y0 + r) * g_cur_stride_words + x0;
+            int32_t c = 0;
+            if (((uintptr_t)row & 7) != 0 && c < fill_w) {
+                row[c++] = val;
+            }
+            int32_t rem = fill_w - c;
+            int32_t count64 = rem / 2;
+            uint64_t *row64 = (uint64_t *)(row + c);
+            for (int32_t i = 0; i < count64; i++) {
+                row64[i] = val64;
+            }
+            if (rem & 1) {
+                row[fill_w - 1] = val;
+            }
         }
     }
-    goot_render_damage(x0, y0, fill_w, fill_h);
+    update_damage(x0, y0, x1, y1);
+}
+
+static inline uint32_t div255_fast(uint32_t v) {
+    uint32_t t = v + 128U;
+    return (t + (t >> 8)) >> 8;
 }
 
 static inline void blend_glyph_a8(int32_t dx, int32_t dy, const goot_glyph_t *g, uint32_t fg_rgb) {
@@ -124,14 +157,14 @@ static inline void blend_glyph_a8(int32_t dx, int32_t dy, const goot_glyph_t *g,
                 uint32_t dg = (dp >> 8)  & 0xFFU;
                 uint32_t db = dp & 0xFFU;
                 uint32_t inv_a = 255U - a;
-                uint32_t out_r = (fr * a + dr * inv_a + 127U) / 255U;
-                uint32_t out_g = (fg * a + dg * inv_a + 127U) / 255U;
-                uint32_t out_b = (fb * a + db * inv_a + 127U) / 255U;
+                uint32_t out_r = div255_fast(fr * a + dr * inv_a);
+                uint32_t out_g = div255_fast(fg * a + dg * inv_a);
+                uint32_t out_b = div255_fast(fb * a + db * inv_a);
                 d[c] = 0xFF000000U | (out_r << 16) | (out_g << 8) | out_b;
             }
         }
     }
-    goot_render_damage(x0, y0, w, h);
+    update_damage(x0, y0, x1, y1);
 }
 
 static bool render_procedural_glyph(int32_t px, int32_t py, int32_t w, int32_t h,

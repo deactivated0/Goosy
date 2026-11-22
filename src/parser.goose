@@ -624,25 +624,58 @@ fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const
         // Fast-path: chunk consecutive printable ASCII characters in ST_GROUND
         if p.state == ST_GROUND && p.utf8_dec.expected == 0 && !s.wrap_pending && s.view_offset == 0 {
             let row_base = (s.cy as i64) * s.cols;
+            var template_cell = screen::Cell {
+                cp: 0x20, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
+                attrs: s.cur_attrs, width: 1, flags: 0,
+                ul_style: s.cur_ul_style, ul_color: s.cur_ul_color, link_id: s.cur_link_id,
+            };
             var mark_dirty = false;
-            while i < n && s.cx < s.cols - 1 {
+            while i < n && s.cx < s.cols {
                 let b = data[i];
                 if b < 0x20 || b >= 0x7F { break; }
-                let idx = row_base + s.cx;
-                s.cells[idx] = screen::Cell {
-                    cp: b, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
-                    attrs: s.cur_attrs, width: 1, flags: 0,
-                    ul_style: s.cur_ul_style, ul_color: s.cur_ul_color, link_id: s.cur_link_id,
-                };
-                s.cx += 1;
-                i += 1;
+                template_cell.cp = b;
+                s.cells[row_base + s.cx] = template_cell;
                 mark_dirty = true;
+                i += 1;
+                if s.cx + 1 >= s.cols {
+                    s.cx = s.cols - 1;
+                    if s.autowrap { s.wrap_pending = true; }
+                    break;
+                } else {
+                    s.cx += 1;
+                }
             }
             if mark_dirty {
                 screen::mark_row_dirty(s, s.cy);
             }
             if i >= n { break; }
         }
+
+        // Fast-path for CRLF (\r\n) and LF (\n) in ST_GROUND
+        if p.state == ST_GROUND && p.utf8_dec.expected == 0 && s.view_offset == 0 {
+            let b0 = data[i];
+            if b0 == 0x0D {
+                if i + 1 < n && data[i + 1] == 0x0A {
+                    s.wrap_pending = false;
+                    s.cx = 0;
+                    screen::linefeed(s);
+                    i += 2;
+                    continue;
+                } else {
+                    s.wrap_pending = false;
+                    s.cx = 0;
+                    screen::mark_row_dirty(s, s.cy);
+                    i += 1;
+                    continue;
+                }
+            } else if b0 == 0x0A {
+                s.wrap_pending = false;
+                screen::linefeed(s);
+                i += 1;
+                continue;
+            }
+        }
+
         feed_byte(p, s, pal, data[i]);
         i += 1;
     }

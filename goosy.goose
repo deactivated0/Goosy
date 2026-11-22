@@ -168,7 +168,7 @@ fn main() {
     }
     defer ffi::poll_close();
 
-    var pty_buf: u8[16384]  = [0; 16384];
+    var pty_buf: u8[65536]  = [0; 65536];
     var key_utf8: u8[16]    = [0; 16];
     var clip_buf: u8[65536] = [0; 65536];
     var key_out: u8[>..]    = [];
@@ -647,7 +647,7 @@ fn main() {
 
         if (ready & ffi::POLL_PTY) != 0 {
             var batch: i32 = 0;
-            while batch < 4 {
+            while batch < 8 {
                 let n = ffi::pty_read(pty_buf);
                 if n > 0 {
                     parser::feed_slice(par, scr, cfg.palette, pty_buf[..n]);

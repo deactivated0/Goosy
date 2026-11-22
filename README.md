@@ -25,7 +25,7 @@ Measured directly under Linux 7.3.4 (x86_64) on a native Wayland compositor. Mea
 
 | Terminal Emulator | Binary Size | Cold Startup | Steady Idle RSS | Steady Idle PSS | Idle CPU (2s) | Stream Throughput | Architecture / UI Toolkit |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
-| **Goosy** (`goot`) | **0.30 MB** | **51.9 ms** | **39.1 MB** | **26.7 MB** | **0 ticks** | **9.9 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
+| **Goosy** (`goot`) | **0.30 MB** | **46.1 ms** | **38.6 MB** | **28.5 MB** | **0 ticks** | **10.4 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
 | **Foot** | 0.48 MB | 50.4 ms | 21.0 MB | 8.0 MB | 0 ticks | 37.6 MB/s | Pure C / Custom Wayland |
 | **Alacritty** | 8.30 MB | 150.3 ms | 94.2 MB | 38.0 MB | 0 ticks | 21.3 MB/s | Rust / OpenGL (winit) |
 | **Kitty** | 0.10 MB* | 260.4 ms | 125.0 MB | 58.0 MB | 0 ticks | 15.1 MB/s | C + Python + OpenGL (*81 MB runtime) |
@@ -35,9 +35,9 @@ Measured directly under Linux 7.3.4 (x86_64) on a native Wayland compositor. Mea
 
 ### Internal Microbenchmarks
 
-- **Font Glyph Cache Lookups**: **66,666,666 lookups/s** (1,000,000 lookups completed in 15 ms).
-- **Full-Frame Cell Composite Rate**: **621.1 FPS** (100 full frames of 120×40 cells / 480,000 cells composited in 161 ms; ~2,981,366 cells/s).
-- **History Scrollback Throughput**: **12,876 lines/s** (50,000 line scrollback operations in 3,883 ms).
+- **Font Glyph Cache Lookups**: **71,428,571 lookups/s** (1,000,000 lookups completed in 14 ms).
+- **Full-Frame Cell Composite Rate**: **751.9 FPS** (100 full frames of 120×40 cells / 480,000 cells composited in 133 ms; ~3,609,022 cells/s).
+- **History Scrollback Throughput**: **30,921 lines/s** (50,000 line scrollback operations in 1,617 ms — **2.40x performance improvement**).
 
 ---
 
