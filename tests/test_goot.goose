@@ -110,6 +110,50 @@ fn test_mouse_selection_modes() {
     scr.sel_x1 = 2; scr.sel_y1 = 1;
     assert(screen::is_selected(scr, 1, 1));
     assert(!screen::is_selected(scr, 3, 0));
+
+    // Single line left-to-right selection from (5, 2) to (15, 2)
+    scr.sel_mode = screen::SEL_CHAR;
+    scr.sel_x0 = 5; scr.sel_y0 = 2;
+    scr.sel_x1 = 15; scr.sel_y1 = 2;
+    assert(screen::is_selected(scr, 5, 2));
+    assert(screen::is_selected(scr, 10, 2));
+    assert(screen::is_selected(scr, 15, 2));
+    assert(!screen::is_selected(scr, 4, 2));
+    assert(!screen::is_selected(scr, 16, 2));
+    assert(!screen::is_selected(scr, 10, 1));
+
+    // Single line right-to-left selection from (15, 2) to (5, 2)
+    scr.sel_x0 = 15; scr.sel_y0 = 2;
+    scr.sel_x1 = 5; scr.sel_y1 = 2;
+    assert(screen::is_selected(scr, 10, 2));
+    assert(screen::is_selected(scr, 5, 2));
+    assert(screen::is_selected(scr, 15, 2));
+    assert(!screen::is_selected(scr, 4, 2));
+    assert(!screen::is_selected(scr, 16, 2));
+
+    // Multi-line top-to-bottom selection from (10, 2) to (5, 4)
+    scr.sel_x0 = 10; scr.sel_y0 = 2;
+    scr.sel_x1 = 5; scr.sel_y1 = 4;
+    assert(!screen::is_selected(scr, 9, 2));
+    assert(screen::is_selected(scr, 10, 2));
+    assert(screen::is_selected(scr, 39, 2));
+    assert(screen::is_selected(scr, 0, 3));
+    assert(screen::is_selected(scr, 39, 3));
+    assert(screen::is_selected(scr, 5, 4));
+    assert(!screen::is_selected(scr, 6, 4));
+
+    // Multi-line bottom-to-top selection from (5, 4) to (10, 2)
+    scr.sel_x0 = 5; scr.sel_y0 = 4;
+    scr.sel_x1 = 10; scr.sel_y1 = 2;
+    assert(!screen::is_selected(scr, 9, 2));
+    assert(screen::is_selected(scr, 10, 2));
+    assert(screen::is_selected(scr, 39, 2));
+    assert(screen::is_selected(scr, 0, 3));
+    assert(screen::is_selected(scr, 5, 4));
+    assert(!screen::is_selected(scr, 6, 4));
+
+    // Selection must never alter viewport scroll offset
+    assert(scr.view_offset == 0);
 }
 
 fn test_shortcuts_and_goot_ini() {
@@ -150,16 +194,16 @@ fn test_fastfetch_alignment_and_box_drawing() {
 
     // Row 0 checks:
     let c_quote = screen::visible_cell(scr, 20, 0);
-    assert(c_quote.cp == '\'' as u32);
+    assert(c_quote.cp == '\'');
     let c_a = screen::visible_cell(scr, 44, 0);
-    assert(c_a.cp == 'A' as u32);
+    assert(c_a.cp == 'A');
     assert(c_a.fg == 0x0096FF); // 0, 150, 255 RGB
 
     // Row 1 checks:
     let c_o = screen::visible_cell(scr, 20, 1);
-    assert(c_o.cp == 'o' as u32);
+    assert(c_o.cp == 'o');
     let c_sys = screen::visible_cell(scr, 44, 1);
-    assert(c_sys.cp == 'S' as u32);
+    assert(c_sys.cp == 'S');
     let c_dash = screen::visible_cell(scr, 51, 1);
     assert(c_dash.cp == 0x2500);
 
@@ -195,12 +239,12 @@ fn test_underlines_hyperlinks_and_reflow() {
     var reflow_par = parser::Parser { .. };
     // "1234567890abcdef" on 10-col screen soft-wraps "abcdef" to row 1
     parser::feed_slice(reflow_par, reflow_scr, pal, "1234567890abcdef\r\n");
-    assert(screen::visible_cell(reflow_scr, 0, 1).cp == 'a' as u32);
+    assert(screen::visible_cell(reflow_scr, 0, 1).cp == 'a');
     assert(reflow_scr.wrapped_rows[0] == 1);
 
     // Now resize wider to 20 cols: logical line should unwrap and fit on row 0
     screen::resize(reflow_scr, 20, 4);
-    assert(screen::visible_cell(reflow_scr, 10, 0).cp == 'a' as u32);
+    assert(screen::visible_cell(reflow_scr, 10, 0).cp == 'a');
     assert(reflow_scr.wrapped_rows[0] == 0);
 }
 

@@ -97,7 +97,7 @@ fn push_csi_arrow(out: u8[>..]&, letter: u8, mods: i32, app_cursor: bool) {
     let mp = xterm_mod_param(mods);
     if mp > 1 {
         out.append("\x1b[1;");
-        out.push(('0' as i32 + mp) as! u8);
+        out.push(('0' + mp) as! u8);
         out.push(letter);
     } else if app_cursor {
         out.append("\x1bO");
@@ -114,7 +114,7 @@ fn push_tilde_key(out: u8[>..]&, num: const u8[:], mods: i32) {
     out.append(num);
     if mp > 1 {
         out.push(';');
-        out.push(('0' as i32 + mp) as! u8);
+        out.push(('0' + mp) as! u8);
     }
     out.push('~');
 }
@@ -198,7 +198,7 @@ fn push_u32_dec(out: u8[>..]&, v: i32) {
     if n == 0 { out.push('0'); return; }
     var buf: u8[..12] = [];
     while n > 0 {
-        buf.push(('0' as i32 + (n % 10)) as! u8);
+        buf.push(('0' + (n % 10)) as! u8);
         n = n / 10;
     }
     var k = buf.len - 1;

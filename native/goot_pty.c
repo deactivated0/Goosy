@@ -443,11 +443,18 @@ int64_t goot_pty_write(goot_const_bytes_t data) {
         size_t rem = (size_t)data.len - written;
         size_t avail = pty_write_buf_free();
         size_t to_queue = rem < avail ? rem : avail;
-        for (size_t i = 0; i < to_queue; i++) {
-            g_write_buf[g_write_tail] = data.data[written + i];
-            g_write_tail = (g_write_tail + 1) % PTY_WRITE_BUF_CAP;
+        if (to_queue > 0) {
+            size_t first = PTY_WRITE_BUF_CAP - g_write_tail;
+            if (to_queue <= first) {
+                memcpy(g_write_buf + g_write_tail, data.data + written, to_queue);
+                g_write_tail = (g_write_tail + to_queue) % PTY_WRITE_BUF_CAP;
+            } else {
+                memcpy(g_write_buf + g_write_tail, data.data + written, first);
+                memcpy(g_write_buf, data.data + written + first, to_queue - first);
+                g_write_tail = to_queue - first;
+            }
+            written += to_queue;
         }
-        written += to_queue;
     }
     return (int64_t)written;
 }

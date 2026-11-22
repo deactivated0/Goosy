@@ -65,9 +65,9 @@ fn dim_rgb(rgb: u32) -> u32 {
 }
 
 fn hex_nibble(c: u8) -> i32 {
-    if c >= '0' && c <= '9' { return (c - '0') as i32; }
-    if c >= 'a' && c <= 'f' { return (c - 'a') as i32 + 10; }
-    if c >= 'A' && c <= 'F' { return (c - 'A') as i32 + 10; }
+    if c >= '0' && c <= '9' { return (c - '0'); }
+    if c >= 'a' && c <= 'f' { return (c - 'a' + 10); }
+    if c >= 'A' && c <= 'F' { return (c - 'A' + 10); }
     return -1;
 }
 

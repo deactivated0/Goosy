@@ -153,7 +153,7 @@ fn erase_cell(s: Screen&) -> Cell {
 }
 
 fn mark_row_dirty(s: Screen&, row: i32) {
-    if row >= 0 && row < s.rows && (row as i64) < s.dirty_rows.len {
+    if row >= 0 && row < s.rows && row < s.dirty_rows.len {
         s.dirty_rows[row] = 2;
     }
 }
@@ -161,14 +161,14 @@ fn mark_row_dirty(s: Screen&, row: i32) {
 fn mark_all_dirty(s: Screen&) {
     s.full_redraw_frames = 2;
     for r in 0..s.rows {
-        if (r as i64) < s.dirty_rows.len { s.dirty_rows[r] = 2; }
+        if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
     }
 }
 
 fn clear_dirty(s: Screen&) {
     if s.full_redraw_frames > 0 { s.full_redraw_frames -= 1; }
     for r in 0..s.rows {
-        if (r as i64) < s.dirty_rows.len && s.dirty_rows[r] > 0 {
+        if r < s.dirty_rows.len && s.dirty_rows[r] > 0 {
             s.dirty_rows[r] -= 1;
         }
     }
@@ -202,7 +202,7 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     s.mouse_mode = 0;
     s.mouse_sgr = false;
 
-    let total = (c as i64) * (r as i64);
+    let total = (c as i64) * r;
     let b = blank_cell(s);
     s.cells.clear();
     s.alt_cells.clear();
@@ -235,7 +235,7 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     s.sb_prompt_rows.clear();
     s.sb_wrapped_rows.clear();
     if cap > 0 {
-        let sb_total = (cap as i64) * (c as i64);
+        let sb_total = (cap as i64) * c;
         for _ in 0..sb_total { s.sb_cells.push(b); }
         for _ in 0..cap { s.sb_prompt_rows.push(0); s.sb_wrapped_rows.push(0); }
     }
@@ -258,7 +258,7 @@ fn set_cursor(s: Screen&, x: i32, y: i32) {
 }
 
 fn mark_prompt_row(s: Screen&) {
-    if !s.alt_screen && s.cy >= 0 && (s.cy as i64) < s.prompt_rows.len {
+    if !s.alt_screen && s.cy >= 0 && s.cy < s.prompt_rows.len {
         s.prompt_rows[s.cy] = 1;
     }
 }
@@ -273,22 +273,28 @@ fn push_scrollback_row(s: Screen&, row: i32) {
         s.sb_count += 1;
     }
 
-    if (dst_line as i64) < s.sb_prompt_rows.len && (row as i64) < s.prompt_rows.len {
+    if dst_line < s.sb_prompt_rows.len && row < s.prompt_rows.len {
         s.sb_prompt_rows[dst_line] = s.prompt_rows[row];
     }
-    if (dst_line as i64) < s.sb_wrapped_rows.len && (row as i64) < s.wrapped_rows.len {
+    if dst_line < s.sb_wrapped_rows.len && row < s.wrapped_rows.len {
         s.sb_wrapped_rows[dst_line] = s.wrapped_rows[row];
     }
 
-    let copy_cols = if s.cols < s.sb_cols { s.cols } else { s.sb_cols };
-    let b = blank_cell(s);
-    let src_base = (row as i64) * (s.cols as i64);
-    let dst_base = (dst_line as i64) * (s.sb_cols as i64);
-    for c in 0..s.sb_cols {
-        if c < copy_cols {
-            s.sb_cells[dst_base + (c as i64)] = s.cells[src_base + (c as i64)];
-        } else {
-            s.sb_cells[dst_base + (c as i64)] = b;
+    let src_base = (row as i64) * s.cols;
+    let dst_base = (dst_line as i64) * s.sb_cols;
+    if s.cols == s.sb_cols {
+        for c in 0..s.cols {
+            s.sb_cells[dst_base + c] = s.cells[src_base + c];
+        }
+    } else {
+        let copy_cols = if s.cols < s.sb_cols { s.cols } else { s.sb_cols };
+        let b = blank_cell(s);
+        for c in 0..s.sb_cols {
+            if c < copy_cols {
+                s.sb_cells[dst_base + c] = s.cells[src_base + c];
+            } else {
+                s.sb_cells[dst_base + c] = b;
+            }
         }
     }
 }
@@ -302,15 +308,15 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
     }
 
     for r in top..(bottom - count + 1) {
-        let dst = (r as i64) * (s.cols as i64);
-        let src = ((r + count) as i64) * (s.cols as i64);
+        let dst = (r as i64) * s.cols;
+        let src = ((r + count) as i64) * s.cols;
         for c in 0..s.cols {
-            s.cells[dst + (c as i64)] = s.cells[src + (c as i64)];
+            s.cells[dst + c] = s.cells[src + c];
         }
-        if (r as i64) < s.prompt_rows.len && ((r + count) as i64) < s.prompt_rows.len {
+        if r < s.prompt_rows.len && (r + count) < s.prompt_rows.len {
             s.prompt_rows[r] = s.prompt_rows[r + count];
         }
-        if (r as i64) < s.wrapped_rows.len && ((r + count) as i64) < s.wrapped_rows.len {
+        if r < s.wrapped_rows.len && (r + count) < s.wrapped_rows.len {
             s.wrapped_rows[r] = s.wrapped_rows[r + count];
         }
         mark_row_dirty(s, r);
@@ -318,10 +324,10 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
 
     let ec = erase_cell(s);
     for r in (bottom - count + 1)..(bottom + 1) {
-        let base = (r as i64) * (s.cols as i64);
-        for c in 0..s.cols { s.cells[base + (c as i64)] = ec; }
-        if (r as i64) < s.prompt_rows.len { s.prompt_rows[r] = 0; }
-        if (r as i64) < s.wrapped_rows.len { s.wrapped_rows[r] = 0; }
+        let base = (r as i64) * s.cols;
+        for c in 0..s.cols { s.cells[base + c] = ec; }
+        if r < s.prompt_rows.len { s.prompt_rows[r] = 0; }
+        if r < s.wrapped_rows.len { s.wrapped_rows[r] = 0; }
         mark_row_dirty(s, r);
     }
 }
@@ -332,13 +338,13 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
 
     var r = bottom;
     while r >= top + count {
-        let dst = (r as i64) * (s.cols as i64);
-        let src = ((r - count) as i64) * (s.cols as i64);
-        for c in 0..s.cols { s.cells[dst + (c as i64)] = s.cells[src + (c as i64)]; }
-        if (r as i64) < s.prompt_rows.len && ((r - count) as i64) < s.prompt_rows.len {
+        let dst = (r as i64) * s.cols;
+        let src = ((r - count) as i64) * s.cols;
+        for c in 0..s.cols { s.cells[dst + c] = s.cells[src + c]; }
+        if r < s.prompt_rows.len && (r - count) < s.prompt_rows.len {
             s.prompt_rows[r] = s.prompt_rows[r - count];
         }
-        if (r as i64) < s.wrapped_rows.len && ((r - count) as i64) < s.wrapped_rows.len {
+        if r < s.wrapped_rows.len && (r - count) < s.wrapped_rows.len {
             s.wrapped_rows[r] = s.wrapped_rows[r - count];
         }
         mark_row_dirty(s, r);
@@ -347,10 +353,10 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
 
     let ec = erase_cell(s);
     for r2 in top..(top + count) {
-        let base = (r2 as i64) * (s.cols as i64);
-        for c in 0..s.cols { s.cells[base + (c as i64)] = ec; }
-        if (r2 as i64) < s.prompt_rows.len { s.prompt_rows[r2] = 0; }
-        if (r2 as i64) < s.wrapped_rows.len { s.wrapped_rows[r2] = 0; }
+        let base = (r2 as i64) * s.cols;
+        for c in 0..s.cols { s.cells[base + c] = ec; }
+        if r2 < s.prompt_rows.len { s.prompt_rows[r2] = 0; }
+        if r2 < s.wrapped_rows.len { s.wrapped_rows[r2] = 0; }
         mark_row_dirty(s, r2);
     }
 }
@@ -387,7 +393,7 @@ fn put_codepoint(s: Screen&, cp: u32) {
     if w == 0 {
         if utf8::is_combining(cp) {
             let prev_x = if s.wrap_pending { s.cx } else if s.cx > 0 { s.cx - 1 } else { 0 };
-            let idx = (s.cy as i64) * (s.cols as i64) + (prev_x as i64);
+            let idx = (s.cy as i64) * s.cols + prev_x;
             if idx >= 0 && idx < s.cells.len {
                 s.cells[idx].combining = cp;
                 mark_row_dirty(s, s.cy);
@@ -399,7 +405,7 @@ fn put_codepoint(s: Screen&, cp: u32) {
     if s.wrap_pending {
         s.wrap_pending = false;
         if s.autowrap {
-            if s.cy >= 0 && (s.cy as i64) < s.wrapped_rows.len {
+            if s.cy >= 0 && s.cy < s.wrapped_rows.len {
                 s.wrapped_rows[s.cy] = 1;
             }
             s.cx = 0; linefeed(s);
@@ -407,17 +413,17 @@ fn put_codepoint(s: Screen&, cp: u32) {
     }
 
     if w == 2 && s.cx == s.cols - 1 && s.autowrap {
-        let pad_idx = (s.cy as i64) * (s.cols as i64) + (s.cx as i64);
+        let pad_idx = (s.cy as i64) * s.cols + s.cx;
         s.cells[pad_idx] = erase_cell(s);
         mark_row_dirty(s, s.cy);
-        if s.cy >= 0 && (s.cy as i64) < s.wrapped_rows.len {
+        if s.cy >= 0 && s.cy < s.wrapped_rows.len {
             s.wrapped_rows[s.cy] = 1;
         }
         s.cx = 0;
         linefeed(s);
     }
 
-    let idx = (s.cy as i64) * (s.cols as i64) + (s.cx as i64);
+    let idx = (s.cy as i64) * s.cols + s.cx;
     s.cells[idx] = Cell {
         cp: cp, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
         attrs: s.cur_attrs, width: w as! u8, flags: 0,
@@ -446,16 +452,16 @@ fn erase_display(s: Screen&, mode: i32) {
     s.wrap_pending = false;
     let ec = erase_cell(s);
     if mode == 0 {
-        let start = (s.cy as i64) * (s.cols as i64) + (s.cx as i64);
+        let start = (s.cy as i64) * s.cols + s.cx;
         for i in start..s.cells.len { s.cells[i] = ec; }
         for r in s.cy..s.rows { mark_row_dirty(s, r); }
     } else if mode == 1 {
-        let end = (s.cy as i64) * (s.cols as i64) + (s.cx as i64) + 1;
+        let end = (s.cy as i64) * s.cols + s.cx + 1;
         for i in 0..end { if i < s.cells.len { s.cells[i] = ec; } }
         for r in 0..(s.cy + 1) { mark_row_dirty(s, r); }
     } else if mode == 2 || mode == 3 {
         for i in 0..s.cells.len { s.cells[i] = ec; }
-        for r in 0..s.rows { if (r as i64) < s.prompt_rows.len { s.prompt_rows[r] = 0; } }
+        for r in 0..s.rows { if r < s.prompt_rows.len { s.prompt_rows[r] = 0; } }
         if mode == 3 {
             s.sb_head = 0; s.sb_count = 0; s.view_offset = 0;
         }
@@ -466,13 +472,13 @@ fn erase_display(s: Screen&, mode: i32) {
 fn erase_line(s: Screen&, mode: i32) {
     s.wrap_pending = false;
     let ec = erase_cell(s);
-    let base = (s.cy as i64) * (s.cols as i64);
+    let base = (s.cy as i64) * s.cols;
     if mode == 0 {
-        for c in s.cx..s.cols { s.cells[base + (c as i64)] = ec; }
+        for c in s.cx..s.cols { s.cells[base + c] = ec; }
     } else if mode == 1 {
-        for c in 0..(s.cx + 1) { s.cells[base + (c as i64)] = ec; }
+        for c in 0..(s.cx + 1) { s.cells[base + c] = ec; }
     } else if mode == 2 {
-        for c in 0..s.cols { s.cells[base + (c as i64)] = ec; }
+        for c in 0..s.cols { s.cells[base + c] = ec; }
     }
     mark_row_dirty(s, s.cy);
 }
@@ -488,35 +494,35 @@ fn delete_lines(s: Screen&, n: i32) {
 fn insert_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
-    let base = (s.cy as i64) * (s.cols as i64);
+    let base = (s.cy as i64) * s.cols;
     var c = s.cols - 1;
     while c >= s.cx + count {
-        s.cells[base + (c as i64)] = s.cells[base + ((c - count) as i64)];
+        s.cells[base + c] = s.cells[base + (c - count)];
         c -= 1;
     }
     let ec = erase_cell(s);
-    for c2 in s.cx..(s.cx + count) { s.cells[base + (c2 as i64)] = ec; }
+    for c2 in s.cx..(s.cx + count) { s.cells[base + c2] = ec; }
     mark_row_dirty(s, s.cy);
 }
 
 fn delete_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
-    let base = (s.cy as i64) * (s.cols as i64);
+    let base = (s.cy as i64) * s.cols;
     for c in s.cx..(s.cols - count) {
-        s.cells[base + (c as i64)] = s.cells[base + ((c + count) as i64)];
+        s.cells[base + c] = s.cells[base + (c + count)];
     }
     let ec = erase_cell(s);
-    for c2 in (s.cols - count)..s.cols { s.cells[base + (c2 as i64)] = ec; }
+    for c2 in (s.cols - count)..s.cols { s.cells[base + c2] = ec; }
     mark_row_dirty(s, s.cy);
 }
 
 fn erase_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
-    let base = (s.cy as i64) * (s.cols as i64);
+    let base = (s.cy as i64) * s.cols;
     let ec = erase_cell(s);
-    for c in s.cx..(s.cx + count) { s.cells[base + (c as i64)] = ec; }
+    for c in s.cx..(s.cx + count) { s.cells[base + c] = ec; }
     mark_row_dirty(s, s.cy);
 }
 
@@ -524,7 +530,7 @@ fn tab_forward(s: Screen&) {
     s.wrap_pending = false;
     var c = s.cx + 1;
     while c < s.cols - 1 {
-        if (c as i64) < s.tab_stops.len && s.tab_stops[c] != 0 { break; }
+        if c < s.tab_stops.len && s.tab_stops[c] != 0 { break; }
         c += 1;
     }
     if c >= s.cols { c = s.cols - 1; }
@@ -558,6 +564,8 @@ fn leave_alt_screen(s: Screen&, restore_cursor: bool) {
     if !s.alt_screen { return; }
     swap_buffers(s);
     s.alt_screen = false;
+    s.mouse_mode = 0;
+    s.mouse_sgr = false;
     s.scroll_top = 0; s.scroll_bottom = s.rows - 1;
     if restore_cursor { s.cx = s.alt_saved_cx; s.cy = s.alt_saved_cy; clamp_cursor(s); }
     mark_all_dirty(s);
@@ -572,13 +580,13 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
 
     if nc == s.cols {
         var next_cells: Cell[>..] = [];
-        let total = (nc as i64) * (nr as i64);
+        let total = (nc as i64) * nr;
         for _ in 0..total { next_cells.push(b); }
         let min_r = if nr < s.rows { nr } else { s.rows };
         for r in 0..min_r {
-            let src = (r as i64) * (s.cols as i64);
-            let dst = (r as i64) * (nc as i64);
-            for c in 0..s.cols { next_cells[dst + (c as i64)] = s.cells[src + (c as i64)]; }
+            let src = (r as i64) * s.cols;
+            let dst = (r as i64) * nc;
+            for c in 0..s.cols { next_cells[dst + c] = s.cells[src + c]; }
         }
         s.cells.clear();
         for i in 0..total { s.cells.push(next_cells[i]); }
@@ -612,17 +620,17 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
         let is_sb = abs_r < s.sb_count;
         let is_wrapped = if is_sb {
             let lidx = (s.sb_head + abs_r) % s.sb_cap_lines;
-            if (lidx as i64) < s.sb_wrapped_rows.len { s.sb_wrapped_rows[lidx] } else { 0 }
+            if lidx < s.sb_wrapped_rows.len { s.sb_wrapped_rows[lidx] } else { 0 }
         } else {
             let lr = abs_r - s.sb_count;
-            if (lr as i64) < s.wrapped_rows.len { s.wrapped_rows[lr] } else { 0 }
+            if lr < s.wrapped_rows.len { s.wrapped_rows[lr] } else { 0 }
         };
         let is_prompt = if is_sb {
             let lidx = (s.sb_head + abs_r) % s.sb_cap_lines;
-            if (lidx as i64) < s.sb_prompt_rows.len { s.sb_prompt_rows[lidx] } else { 0 }
+            if lidx < s.sb_prompt_rows.len { s.sb_prompt_rows[lidx] } else { 0 }
         } else {
             let lr = abs_r - s.sb_count;
-            if (lr as i64) < s.prompt_rows.len { s.prompt_rows[lr] } else { 0 }
+            if lr < s.prompt_rows.len { s.prompt_rows[lr] } else { 0 }
         };
         if cur_line_len == 0 && is_prompt != 0 { cur_line_prompt = 1; }
 
@@ -708,15 +716,15 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
         s.prompt_rows.push(0);
         s.dirty_rows.push(2);
     }
-    for _ in 0..((nc as i64) * (nr as i64)) { s.cells.push(b); }
+    for _ in 0..((nc as i64) * nr) { s.cells.push(b); }
 
     let live_rows_to_copy = if total_reflowed - live_start_row < nr { total_reflowed - live_start_row } else { nr };
     for r in 0..live_rows_to_copy {
         let src_r = live_start_row + r;
-        let src_base = (src_r as i64) * (nc as i64);
-        let dst_base = (r as i64) * (nc as i64);
+        let src_base = (src_r as i64) * nc;
+        let dst_base = (r as i64) * nc;
         for c in 0..nc {
-            s.cells[dst_base + (c as i64)] = reflowed_rows[src_base + (c as i64)];
+            s.cells[dst_base + c] = reflowed_rows[src_base + c];
         }
         s.wrapped_rows[r] = reflowed_wrapped[src_r];
         s.prompt_rows[r] = reflowed_prompts[src_r];
@@ -726,17 +734,17 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
     s.sb_prompt_rows.clear();
     s.sb_wrapped_rows.clear();
     if s.sb_cap_lines > 0 {
-        for _ in 0..((s.sb_cap_lines as i64) * (nc as i64)) { s.sb_cells.push(b); }
+        for _ in 0..((s.sb_cap_lines as i64) * nc) { s.sb_cells.push(b); }
         for _ in 0..s.sb_cap_lines { s.sb_prompt_rows.push(0); s.sb_wrapped_rows.push(0); }
 
         let sb_take_start = if sb_count > s.sb_cap_lines { sb_count - s.sb_cap_lines } else { 0 };
         let sb_take_count = sb_count - sb_take_start;
         for i in 0..sb_take_count {
             let src_r = sb_take_start + i;
-            let src_base = (src_r as i64) * (nc as i64);
-            let dst_base = (i as i64) * (nc as i64);
+            let src_base = (src_r as i64) * nc;
+            let dst_base = (i as i64) * nc;
             for c in 0..nc {
-                s.sb_cells[dst_base + (c as i64)] = reflowed_rows[src_base + (c as i64)];
+                s.sb_cells[dst_base + c] = reflowed_rows[src_base + c];
             }
             s.sb_wrapped_rows[i] = reflowed_wrapped[src_r];
             s.sb_prompt_rows[i] = reflowed_prompts[src_r];
@@ -771,26 +779,26 @@ fn history_cell(s: Screen&, abs_line: i32, col: i32) -> Cell {
     if col < 0 || col >= s.cols { return blank_cell(s); }
     if s.alt_screen {
         if abs_line < 0 || abs_line >= s.rows { return blank_cell(s); }
-        return s.cells[(abs_line as i64) * (s.cols as i64) + (col as i64)];
+        return s.cells[(abs_line as i64) * s.cols + col];
     }
     if abs_line < 0 || abs_line >= s.sb_count + s.rows { return blank_cell(s); }
     if abs_line < s.sb_count {
         if col >= s.sb_cols { return blank_cell(s); }
         let line_idx = (s.sb_head + abs_line) % s.sb_cap_lines;
-        return s.sb_cells[(line_idx as i64) * (s.sb_cols as i64) + (col as i64)];
+        return s.sb_cells[(line_idx as i64) * s.sb_cols + col];
     }
     let live_row = abs_line - s.sb_count;
-    return s.cells[(live_row as i64) * (s.cols as i64) + (col as i64)];
+    return s.cells[(live_row as i64) * s.cols + col];
 }
 
 fn history_is_prompt(s: Screen&, abs_line: i32) -> bool {
     if s.alt_screen || abs_line < 0 || abs_line >= s.sb_count + s.rows { return false; }
     if abs_line < s.sb_count {
         let line_idx = (s.sb_head + abs_line) % s.sb_cap_lines;
-        return (line_idx as i64) < s.sb_prompt_rows.len && s.sb_prompt_rows[line_idx] != 0;
+        return line_idx < s.sb_prompt_rows.len && s.sb_prompt_rows[line_idx] != 0;
     }
     let live_row = abs_line - s.sb_count;
-    return (live_row as i64) < s.prompt_rows.len && s.prompt_rows[live_row] != 0;
+    return live_row < s.prompt_rows.len && s.prompt_rows[live_row] != 0;
 }
 
 // Jump to previous currently-not-visible prompt (Ctrl+Shift+Z, requires OSC 133;A)
@@ -832,7 +840,7 @@ fn jump_next_prompt(s: Screen&) -> bool {
 fn visible_cell(s: Screen&, col: i32, row: i32) -> Cell {
     if col < 0 || col >= s.cols || row < 0 || row >= s.rows { return blank_cell(s); }
     if s.view_offset == 0 || s.alt_screen {
-        return s.cells[(row as i64) * (s.cols as i64) + (col as i64)];
+        return s.cells[(row as i64) * s.cols + col];
     }
     let abs_line = s.sb_count - s.view_offset + row;
     return history_cell(s, abs_line, col);

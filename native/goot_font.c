@@ -87,8 +87,10 @@ static FT_Face find_fallback_face(uint32_t codepoint) {
 }
 
 static glyph_entry_t g_cache[GLYPH_CACHE_CAP];
+static const goot_glyph_t *g_ascii_cache[128][4];
 
 static void clear_glyph_cache(void) {
+    memset((void *)g_ascii_cache, 0, sizeof(g_ascii_cache));
     for (int i = 0; i < GLYPH_CACHE_CAP; i++) {
         if (g_cache[i].used && g_cache[i].glyph.bitmap) {
             free(g_cache[i].glyph.bitmap);
@@ -190,12 +192,20 @@ int32_t goot_font_cell_height(void) { return g_cell_h; }
 int32_t goot_font_baseline(void)    { return g_baseline; }
 
 const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags) {
-    uint64_t key = ((uint64_t)codepoint << 8) | (uint64_t)style_flags;
+    uint8_t style = style_flags & 0x03U;
+    if (codepoint < 128 && g_ascii_cache[codepoint][style]) {
+        return g_ascii_cache[codepoint][style];
+    }
+
+    uint64_t key = ((uint64_t)codepoint << 8) | (uint64_t)style;
     uint32_t idx = (uint32_t)((key * 2654435761ULL) & (GLYPH_CACHE_CAP - 1));
 
     for (uint32_t probe = 0; probe < 16; probe++) {
         uint32_t slot = (idx + probe) & (GLYPH_CACHE_CAP - 1);
         if (g_cache[slot].used && g_cache[slot].key == key) {
+            if (codepoint < 128) {
+                g_ascii_cache[codepoint][style] = &g_cache[slot].glyph;
+            }
             return &g_cache[slot].glyph;
         }
         if (!g_cache[slot].used) {
@@ -205,9 +215,16 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
     }
 
     /* Evict target slot if occupied */
-    if (g_cache[idx].used && g_cache[idx].glyph.bitmap) {
-        free(g_cache[idx].glyph.bitmap);
-        g_cache[idx].glyph.bitmap = NULL;
+    if (g_cache[idx].used) {
+        uint32_t old_cp = (uint32_t)(g_cache[idx].key >> 8);
+        uint8_t old_st = (uint8_t)(g_cache[idx].key & 0x03);
+        if (old_cp < 128) {
+            g_ascii_cache[old_cp][old_st] = NULL;
+        }
+        if (g_cache[idx].glyph.bitmap) {
+            free(g_cache[idx].glyph.bitmap);
+            g_cache[idx].glyph.bitmap = NULL;
+        }
     }
 
     FT_Face face = g_face_reg;
@@ -286,6 +303,9 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
                 memcpy(g->bitmap + (size_t)row * rowstride, src, (size_t)g->width * bpp);
             }
         }
+    }
+    if (codepoint < 128) {
+        g_ascii_cache[codepoint][style] = g;
     }
     return g;
 }

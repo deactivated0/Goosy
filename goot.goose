@@ -244,6 +244,10 @@ fn main() {
                 }
             } else if ev == ffi::EV_FOCUS {
                 focused = (ffi::wl_ev_a() != 0);
+                if !focused {
+                    drag_left = false;
+                    drag_right = false;
+                }
                 scr.title_dirty = true;
                 screen::mark_row_dirty(scr, scr.cy);
             } else if ev == ffi::EV_KEY {
@@ -379,7 +383,27 @@ fn main() {
                 if drag_left {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
                                           ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
-                    scr.sel_x1 = c; scr.sel_y1 = r;
+                    if scr.sel_mode == screen::SEL_LINE {
+                        scr.sel_x0 = 0; scr.sel_x1 = scr.cols - 1;
+                        scr.sel_y1 = r;
+                    } else if scr.sel_mode == screen::SEL_WORD {
+                        let cur = screen::visible_cell(scr, c, r);
+                        let sep = screen::is_word_sep(cur.cp, false);
+                        var c_word = c;
+                        if r < scr.sel_y0 || (r == scr.sel_y0 && c < scr.sel_x0) {
+                            while c_word > 0 && screen::is_word_sep(screen::visible_cell(scr, c_word - 1, r).cp, false) == sep {
+                                c_word -= 1;
+                            }
+                            scr.sel_x1 = c_word; scr.sel_y1 = r;
+                        } else {
+                            while c_word < scr.cols - 1 && screen::is_word_sep(screen::visible_cell(scr, c_word + 1, r).cp, false) == sep {
+                                c_word += 1;
+                            }
+                            scr.sel_x1 = c_word; scr.sel_y1 = r;
+                        }
+                    } else {
+                        scr.sel_x1 = c; scr.sel_y1 = r;
+                    }
                     screen::mark_all_dirty(scr);
                 } else if drag_right {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
@@ -479,6 +503,9 @@ fn main() {
                                 if screen::get_hyperlink(scr, cell.link_id, link_url) && link_url.len > 0 {
                                     let _ = ffi::open_url(link_url);
                                 }
+                            } else if shift && scr.sel_active {
+                                drag_left = true;
+                                screen::extend_selection(scr, c, r, ctrl);
                             } else {
                                 let now = ffi::time_monotonic_ns();
                                 if now - last_click_ns < 400000000 && c == last_click_c && r == last_click_r {
@@ -489,8 +516,8 @@ fn main() {
                                 }
                                 last_click_ns = now; last_click_c = c; last_click_r = r;
 
+                                drag_left = true;
                                 if click_count == 1 {
-                                    drag_left = true;
                                     scr.sel_active = true;
                                     scr.sel_mode = if ctrl { screen::SEL_BLOCK } else { screen::SEL_CHAR };
                                     scr.sel_x0 = c; scr.sel_y0 = r;
@@ -507,7 +534,7 @@ fn main() {
                         } else {
                             drag_left = false;
                             if scr.sel_active {
-                                if click_count == 1 && scr.sel_x0 == scr.sel_x1 && scr.sel_y0 == scr.sel_y1 {
+                                if click_count == 1 && scr.sel_x0 == scr.sel_x1 && scr.sel_y0 == scr.sel_y1 && !shift {
                                     scr.sel_active = false;
                                     screen::mark_all_dirty(scr);
                                 } else {
@@ -572,7 +599,7 @@ fn main() {
                     let is_csd = cfg.title_bar && (ffi::wl_is_csd() != 0);
                     let title_h = if is_csd { cfg.title_bar_height * sc } else { 0 };
                     let held_ms = (ffi::time_monotonic_ns() - touch_down_ns) / 1000000;
-                    if !touch_selecting && held_ms >= (cfg.touch_long_press_ms as i64) {
+                    if !touch_selecting && held_ms >= cfg.touch_long_press_ms {
                         touch_selecting = true;
                         let c0, r0 = px_to_cell(touch_start_x, touch_start_y, sc, cfg.padding,
                                                 ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);

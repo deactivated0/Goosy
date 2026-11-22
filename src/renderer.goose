@@ -21,12 +21,12 @@ fn draw_overlay_bar(top_y: i32, pad_px: i32, row: i32, cols: i32, cell_w: i32, c
     var col: i32 = 0;
     for i in 0..prefix.len {
         if col >= cols { break; }
-        ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h, prefix[i] as u32, fg, bg, screen::ATTR_BOLD as u32, 1);
+        ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h, prefix[i], fg, bg, screen::ATTR_BOLD, 1);
         col += 1;
     }
     for i in 0..body.len {
         if col >= cols { break; }
-        ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h, body[i] as u32, fg, bg, 0, 1);
+        ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h, body[i], fg, bg, 0, 1);
         col += 1;
     }
     while col < cols {
@@ -45,15 +45,15 @@ fn draw_url_labels(m: modes::ModeState&, top_y: i32, pad_px: i32, cols: i32, cel
         for k in 0..u.label.len {
             if col >= cols { break; }
             ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h,
-                             u.label[k] as u32, lbl_fg, lbl_bg, screen::ATTR_BOLD as u32, 1);
+                             u.label[k], lbl_fg, lbl_bg, screen::ATTR_BOLD, 1);
             col += 1;
         }
         if m.url_show_text && col < cols {
-            ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h, ':' as u32, lbl_fg, lbl_bg, 0, 1);
+            ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h, ':', lbl_fg, lbl_bg, 0, 1);
             col += 1;
             for k in 0..u.url.len {
                 if col >= cols { break; }
-                ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h, u.url[k] as u32, lbl_fg, lbl_bg, 0, 1);
+                ffi::render_cell(pad_px + col * cell_w, py, cell_w, cell_h, u.url[k], lbl_fg, lbl_bg, 0, 1);
                 col += 1;
             }
         }
@@ -103,7 +103,7 @@ fn draw_title_bar(s: screen::Screen&, cfg: config::Config&, focused: bool,
 
     for i in 0..title_bytes.len {
         if tx + cell_w >= max_tx { break; }
-        ffi::render_cell(tx, ty, cell_w, cell_h, title_bytes[i] as u32, title_fg, bar_bg, 0, 1);
+        ffi::render_cell(tx, ty, cell_w, cell_h, title_bytes[i], title_fg, bar_bg, 0, 1);
         tx += cell_w;
     }
 
@@ -179,7 +179,7 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
     var any_dirty = is_full || s.title_dirty || (m.kind != modes::MODE_NORMAL);
     if !any_dirty {
         for r in 0..s.rows {
-            if (r as i64) < s.dirty_rows.len && s.dirty_rows[r] > 0 {
+            if r < s.dirty_rows.len && s.dirty_rows[r] > 0 {
                 any_dirty = true;
                 break;
             }
@@ -204,14 +204,18 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
         s.title_dirty = false;
     }
 
+    let is_live = (s.view_offset == 0 || s.alt_screen);
+    let sel_active = s.sel_active;
+
     for row in 0..s.rows {
-        let row_dirty = is_full || ((row as i64) < s.dirty_rows.len && s.dirty_rows[row] > 0) ||
+        let row_dirty = is_full || (row < s.dirty_rows.len && s.dirty_rows[row] > 0) ||
                         (m.kind != modes::MODE_NORMAL && row == s.rows - 1);
         if !row_dirty { continue; }
 
         let py = title_h + pad_px + row * cell_h;
+        let row_base = (row as i64) * s.cols;
         for col in 0..s.cols {
-            let cell = screen::visible_cell(s, col, row);
+            let cell = if is_live { s.cells[row_base + col] } else { screen::visible_cell(s, col, row) };
             if cell.flags == screen::CELL_WIDE_CONT { continue; }
 
             var fg = cell.fg;
@@ -219,14 +223,14 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
             if (cell.attrs & screen::ATTR_INVERSE) != 0 { let tmp = fg; fg = bg; bg = tmp; }
             if (cell.attrs & screen::ATTR_DIM) != 0     { fg = colors::dim_rgb(fg); }
             if (cell.attrs & screen::ATTR_HIDDEN) != 0  { fg = bg; }
-            if screen::is_selected(s, col, row) {
+            if sel_active && screen::is_selected(s, col, row) {
                 fg = cfg.palette.selection_fg;
                 bg = cfg.palette.selection_bg;
             }
 
             let px = pad_px + col * cell_w;
             let span: i32 = if cell.width == 2 { 2 } else { 1 };
-            ffi::render_cell_ext(px, py, cell_w, cell_h, cell.cp, fg, bg, cell.attrs as u32, span, cell.ul_style, cell.ul_color);
+            ffi::render_cell_ext(px, py, cell_w, cell_h, cell.cp, fg, bg, cell.attrs, span, cell.ul_style, cell.ul_color);
         }
     }
 

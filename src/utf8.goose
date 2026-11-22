@@ -26,7 +26,7 @@ fn reset(d: Decoder&) {
 fn feed(d: Decoder&, b: u8) -> u32, bool {
     if d.expected == 0 {
         if b < 0x80 {
-            return b as u32, true;
+            return b, true;
         }
         if (b & 0xE0) == 0xC0 {
             let cp = (b & 0x1F) as u32;
@@ -40,7 +40,7 @@ fn feed(d: Decoder&, b: u8) -> u32, bool {
             return 0, false;
         }
         if (b & 0xF0) == 0xE0 {
-            d.codepoint = (b & 0x0F) as u32;
+            d.codepoint = (b & 0x0F);
             d.expected = 2;
             d.seen = 0;
             d.min_cp = 0x800;
@@ -67,7 +67,7 @@ fn feed(d: Decoder&, b: u8) -> u32, bool {
         return REPLACEMENT_CHAR, true;
     }
 
-    d.codepoint = (d.codepoint << 6) | ((b & 0x3F) as u32);
+    d.codepoint = (d.codepoint << 6) | (b & 0x3F);
     d.seen += 1;
 
     if d.seen == d.expected {
@@ -85,7 +85,8 @@ fn feed(d: Decoder&, b: u8) -> u32, bool {
 
 // Returns true for Unicode zero-width combining marks and format characters.
 fn is_combining(cp: u32) -> bool {
-    if cp >= 0x0300 && cp <= 0x036F { return true; } // Combining Diacritical Marks
+    if cp < 0x0300 { return false; }
+    if cp <= 0x036F { return true; } // Combining Diacritical Marks
     if cp >= 0x1AB0 && cp <= 0x1AFF { return true; } // Combining Diacritical Marks Extended
     if cp >= 0x1DC0 && cp <= 0x1DFF { return true; } // Combining Diacritical Marks Supplement
     if cp >= 0x20D0 && cp <= 0x20FF { return true; } // Combining Diacritical Marks for Symbols
@@ -97,8 +98,9 @@ fn is_combining(cp: u32) -> bool {
 
 // Returns terminal cell width (0, 1, or 2) for a Unicode codepoint.
 fn cell_width(cp: u32) -> i32 {
-    if cp == 0 { return 0; }
+    if cp >= 0x20 && cp < 0x7F { return 1; }
     if cp < 0x20 || (cp >= 0x7F && cp < 0xA0) { return 0; }
+    if cp < 0x0300 { return 1; }
     if is_combining(cp) { return 0; }
 
     // East Asian Wide / Fullwidth & common Emoji blocks

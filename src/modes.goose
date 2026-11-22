@@ -79,7 +79,7 @@ fn match_at(s: screen::Screen&, abs_line: i32, col: i32, q: const u8[:]) -> bool
     if q.len == 0 || col < 0 || col + (q.len as i32) > s.cols { return false; }
     for i in 0..q.len {
         let cell = screen::history_cell(s, abs_line, col + (i as i32));
-        if ascii_lower(cell.cp) != ascii_lower(q[i] as u32) {
+        if ascii_lower(cell.cp) != ascii_lower(q[i]) {
             return false;
         }
     }
@@ -220,7 +220,7 @@ fn is_url_char(cp: u32) -> bool {
 fn row_starts_with(s: screen::Screen&, row: i32, col: i32, prefix: const u8[:]) -> bool {
     if col + (prefix.len as i32) > s.cols { return false; }
     for i in 0..prefix.len {
-        if screen::visible_cell(s, col + (i as i32), row).cp != (prefix[i] as u32) {
+        if screen::visible_cell(s, col + (i as i32), row).cp != prefix[i] {
             return false;
         }
     }
@@ -336,9 +336,9 @@ fn unicode_commit(m: ModeState&, out: u8[>..]&) -> bool {
     var cp: u32 = 0;
     for i in 0..m.uni_hex.len {
         let c = m.uni_hex[i];
-        let v: u32 = if c >= '0' && c <= '9' { (c - '0') as u32 }
-                     else if c >= 'a' && c <= 'f' { (c - 'a' + 10) as u32 }
-                     else { (c - 'A' + 10) as u32 };
+        let v: u32 = if c >= '0' && c <= '9' { c - '0' }
+                     else if c >= 'a' && c <= 'f' { c - 'a' + 10 }
+                     else { c - 'A' + 10 };
         cp = (cp << 4) | v;
     }
     if cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) {

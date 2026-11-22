@@ -32,7 +32,8 @@ c_defines = [
 ];
 
 c_flags_cc = [
-    "-O2",
+    "-O3",
+    "-fomit-frame-pointer",
     "-Wall",
     "-Wextra",
     "-std=c99",

@@ -77,7 +77,7 @@ fn parse_i32(s: const u8[:]) -> i32, bool {
     while i < s.len {
         let c = s[i];
         if c < '0' || c > '9' { return 0, false; }
-        val = val * 10 + ((c - '0') as i64);
+        val = val * 10 + (c - '0');
         if val > 1000000 { return 0, false; }
         i += 1;
     }

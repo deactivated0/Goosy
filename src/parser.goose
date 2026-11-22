@@ -197,7 +197,7 @@ fn push_reply_int(out: u8[>..]&, v: i32) {
     var digits: u8[..12] = [];
     if n == 0 { out.push('0'); return; }
     while n > 0 {
-        digits.push(('0' as i32 + (n % 10)) as! u8);
+        digits.push(('0' + (n % 10)) as! u8);
         n = n / 10;
     }
     var k: i64 = digits.len - 1;
@@ -323,9 +323,9 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
 }
 
 fn hex_val(c: u8) -> i32 {
-    if c >= '0' && c <= '9' { return (c - '0') as i32; }
-    if c >= 'a' && c <= 'f' { return (c - 'a') as i32 + 10; }
-    if c >= 'A' && c <= 'F' { return (c - 'A') as i32 + 10; }
+    if c >= '0' && c <= '9' { return (c - '0'); }
+    if c >= 'a' && c <= 'f' { return (c - 'a' + 10); }
+    if c >= 'A' && c <= 'F' { return (c - 'A' + 10); }
     return -1;
 }
 
@@ -383,7 +383,7 @@ fn dispatch_osc(p: Parser&, s: screen::Screen&) {
     for i in 0..semi {
         let c = p.osc_buf[i];
         if c < '0' || c > '9' { return; }
-        cmd = cmd * 10 + ((c - '0') as i32);
+        cmd = cmd * 10 + (c - '0');
         if cmd > 10000 { return; }
     }
 
@@ -480,7 +480,7 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
             'D' => { screen::linefeed(s); p.state = ST_GROUND; },
             'E' => { s.cx = 0; screen::linefeed(s); p.state = ST_GROUND; },
             'M' => { screen::reverse_index(s); p.state = ST_GROUND; },
-            'H' => { if (s.cx as i64) < s.tab_stops.len { s.tab_stops[s.cx] = 1; } p.state = ST_GROUND; },
+            'H' => { if s.cx < s.tab_stops.len { s.tab_stops[s.cx] = 1; } p.state = ST_GROUND; },
             'c' => { screen::init(s, s.cols, s.rows, pal.fg, pal.bg, s.sb_cap_lines, s.cursor_style); ffi::image_clear(); p.state = ST_GROUND; },
             '(', ')', '*', '+', '#', '%' => { p.state = ST_ESC_INT; },
             _ => { p.state = ST_GROUND; },
@@ -500,7 +500,7 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
         }
         if b >= '0' && b <= '9' {
             p.state = ST_CSI_PARAM; p.has_param = true;
-            if p.cur_param < 100000 { p.cur_param = p.cur_param * 10 + ((b - '0') as i32); }
+            if p.cur_param < 100000 { p.cur_param = p.cur_param * 10 + (b - '0'); }
             return;
         }
         if b == ';' || b == ':' {
@@ -533,7 +533,7 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
             if b == '\\' { dispatch_osc(p, s); p.state = ST_GROUND; return; }
         }
         if b == 0x1B { p.osc_esc_seen = true; return; }
-        if p.osc_buf.len < (MAX_OSC - 1) as i64 { p.osc_buf.push(b); }
+        if p.osc_buf.len < MAX_OSC - 1 { p.osc_buf.push(b); }
         return;
     }
 
@@ -618,5 +618,32 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
 }
 
 fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const u8[:]) {
-    for i in 0..data.len { feed_byte(p, s, pal, data[i]); }
+    var i: i64 = 0;
+    let n = data.len;
+    while i < n {
+        // Fast-path: chunk consecutive printable ASCII characters in ST_GROUND
+        if p.state == ST_GROUND && p.utf8_dec.expected == 0 && !s.wrap_pending && s.view_offset == 0 {
+            let row_base = (s.cy as i64) * s.cols;
+            var mark_dirty = false;
+            while i < n && s.cx < s.cols - 1 {
+                let b = data[i];
+                if b < 0x20 || b >= 0x7F { break; }
+                let idx = row_base + s.cx;
+                s.cells[idx] = screen::Cell {
+                    cp: b, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
+                    attrs: s.cur_attrs, width: 1, flags: 0,
+                    ul_style: s.cur_ul_style, ul_color: s.cur_ul_color, link_id: s.cur_link_id,
+                };
+                s.cx += 1;
+                i += 1;
+                mark_dirty = true;
+            }
+            if mark_dirty {
+                screen::mark_row_dirty(s, s.cy);
+            }
+            if i >= n { break; }
+        }
+        feed_byte(p, s, pal, data[i]);
+        i += 1;
+    }
 }
