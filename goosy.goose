@@ -1,4 +1,4 @@
-// Goot — Native Wayland Terminal Emulator written in Goose
+// Goosy — Native Wayland Terminal Emulator written in Goose
 // Event-driven architecture: blocks on epoll when idle, batches PTY reads,
 // supports Foot-compatible Normal, Scrollback Search, URL, and Unicode modes,
 // multi-click/block/extend mouse selection, primary selection, and touchscreen gestures.
@@ -113,7 +113,7 @@ fn main() {
     let base_font_size = cfg.font_size;
 
     guard ffi::font_init(cfg.font_family, font_size, 96, cfg.line_spacing) == 0 else {
-        print("goot: failed to initialize font engine");
+        print("goosy: failed to initialize font engine");
         exit(1);
     }
     defer ffi::font_close();

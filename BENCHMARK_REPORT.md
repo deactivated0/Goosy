@@ -17,7 +17,7 @@
 
 | Terminal Emulator | Binary Size (MB) | Cold Startup (ms) | Idle RSS (MB) | Idle PSS (MB) | Idle CPU Ticks | Stream Throughput (MB/s) |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Goosy** (`goot`) | **0.30 MB** | **46.1 ms** | **38.6 MB** | **28.5 MB** | **0 ticks** | **10.4 MB/s** |
+| **Goosy** | **0.30 MB** | **46.1 ms** | **38.6 MB** | **28.5 MB** | **0 ticks** | **10.4 MB/s** |
 | **Foot** | 0.48 MB | 50.4 ms | 21.0 MB | 8.0 MB | 0 ticks | 37.6 MB/s |
 | **Alacritty** | 8.30 MB | 150.3 ms | 94.2 MB | 38.0 MB | 0 ticks | 21.3 MB/s |
 | **Kitty** | 0.10 MB* | 260.4 ms | 125.0 MB | 58.0 MB | 0 ticks | 15.1 MB/s |

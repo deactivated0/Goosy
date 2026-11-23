@@ -1,4 +1,4 @@
-# Goot Terminal Configuration (~/.config/goot/goot.toml)
+# Goosy Terminal Configuration (~/.config/goosy/goosy.toml)
 # Minimal, Foot/Kitty-inspired defaults
 
 [font]
@@ -10,7 +10,7 @@ line_spacing = 0
 padding = 8
 initial_cols = 100
 initial_rows = 30
-title = "Goot"
+title = "Goosy"
 
 [colors]
 background = "#080808"

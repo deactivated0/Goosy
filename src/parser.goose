@@ -1,4 +1,4 @@
-// Goot — VT100/VT220/ECMA-48 State-Machine Escape Sequence Parser
+// Goosy — VT100/VT220/ECMA-48 State-Machine Escape Sequence Parser
 // Supports OSC 0/2 (title), OSC 7 (working directory), OSC 133;A (prompt marks),
 // and disables OSC 52 clipboard writes by default.
 

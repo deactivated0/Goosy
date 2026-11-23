@@ -5,7 +5,7 @@ import time
 import subprocess
 
 GOOSY_BIN = "/home/pc/.local/bin/goosy"
-ASSETS_DIR = "/home/pc/builds/goot/assets/screenshots"
+ASSETS_DIR = "os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "screenshots")"
 os.makedirs(ASSETS_DIR, exist_ok=True)
 
 def capture_command(cmd_str, out_png, wait_sec=1.5):

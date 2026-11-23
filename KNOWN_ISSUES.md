@@ -1,9 +1,9 @@
-# Goot — Known Issues & Resolution Status
+# Goosy — Known Issues & Resolution Status
 
 ## Resolved in v0.2.0
 
 1. **Native Wayland Title Bar & Window Management**:
-   - **Resolved**: Integrated client-side decorations (CSD) and server-side decoration negotiation (`zxdg_decoration_manager_v1`). Goot now provides a functional Pixman-rendered title bar featuring window drag/move (`xdg_toplevel.move`), minimize (`xdg_toplevel.set_minimized`), maximize/restore toggle (`xdg_toplevel.set_maximized` / `unset_maximized`), double-click title bar to maximize, button hover/press states, and interactive cursor shape switching (`default`, `pointer`, `text`) via `wayland-cursor`.
+   - **Resolved**: Integrated client-side decorations (CSD) and server-side decoration negotiation (`zxdg_decoration_manager_v1`). Goosy now provides a functional Pixman-rendered title bar featuring window drag/move (`xdg_toplevel.move`), minimize (`xdg_toplevel.set_minimized`), maximize/restore toggle (`xdg_toplevel.set_maximized` / `unset_maximized`), double-click title bar to maximize, button hover/press states, and interactive cursor shape switching (`default`, `pointer`, `text`) via `wayland-cursor`.
 2. **Fastfetch Output Formatting & Alignment**:
    - **Resolved**: Addressed all root causes:
      - Set initial terminal geometry to `110x32` so modern system information strings (e.g. 73-char font strings) and 44-col logos fit cleanly without premature line wrapping.
@@ -14,7 +14,7 @@
 3. **Primary Selection Integration**:
    - **Resolved**: Bound `zwp_primary_selection_device_manager_v1` to support true inter-client Linux primary selection copy and paste (middle-click paste / `Shift+Insert`).
 4. **PTY Backpressure & Write Ring Buffer**:
-   - **Resolved**: Implemented a 64 KiB non-blocking write ring buffer in `goot_pty.c` and integrated `EPOLLOUT` notification in `goot_poll.c` to prevent data loss or blocking on high-volume terminal output.
+   - **Resolved**: Implemented a 64 KiB non-blocking write ring buffer in `goosy_pty.c` and integrated `EPOLLOUT` notification in `goosy_poll.c` to prevent data loss or blocking on high-volume terminal output.
 5. **Config Hex Color Parsing**:
    - **Resolved**: Fixed INI parser to distinguish hex color hash prefixes (`#1a1b26`) from inline comments, preserving custom palette colors.
 6. **Double-Buffering Damage Synchronization**:

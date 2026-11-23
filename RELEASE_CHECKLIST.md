@@ -9,7 +9,7 @@
   - [x] Clean uninstallation verification with `./scripts/uninstall.sh`.
 
 - [x] **Correctness & Tests**
-  - [x] All Goose language tests pass (`cd tests && goose run test_goot.goose`).
+  - [x] All Goose language tests pass (`cd tests && goose run test_goosy.goose`).
   - [x] Native PTY, epoll, and URL security tests pass (`tests/test_native_pty_poll.c`).
   - [x] No layout shift or baseline jump during text selection.
   - [x] Safe resizing with preserved prompt markers and wrapped lines.

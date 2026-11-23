@@ -1,6 +1,6 @@
-// Goot — Pure Goose Terminal Engine Unit Test Suite
+// Goosy — Pure Goose Terminal Engine Unit Test Suite
 // Covers UTF-8, SGR, scrollback, alt screen, OSC 7/133/52, Search/URL/Unicode modes,
-// multi-click/block/quote/extend selection, Foot-compatible shortcuts, and goot.ini parsing.
+// multi-click/block/quote/extend selection, Foot-compatible shortcuts, and goosy.ini parsing.
 
 import src.colors;
 import src.config;
@@ -156,7 +156,7 @@ fn test_mouse_selection_modes() {
     assert(scr.view_offset == 0);
 }
 
-fn test_shortcuts_and_goot_ini() {
+fn test_shortcuts_and_goosy_ini() {
     assert(input::check_shortcut('C', ffi::MOD_CTRL | ffi::MOD_SHIFT) == input::ACT_COPY);
     assert(input::check_shortcut(input::XKB_XF86Copy, 0) == input::ACT_COPY);
     assert(input::check_shortcut(input::XKB_XF86Paste, 0) == input::ACT_PASTE_CLIP);
@@ -369,12 +369,12 @@ fn main() {
     test_osc7_and_osc133_prompt_jumps();
     test_search_url_and_unicode_modes();
     test_mouse_selection_modes();
-    test_shortcuts_and_goot_ini();
+    test_shortcuts_and_goosy_ini();
     test_fastfetch_alignment_and_box_drawing();
     test_underlines_hyperlinks_and_reflow();
     test_agy_escape_sequences_and_state();
     test_crlf_paste_and_resize_preservation();
     test_kitty_keyboard_protocol();
     test_command_output_selection_and_combining();
-    print("goot: all Goose unit tests passed");
+    print("goosy: all Goose unit tests passed");
 }

@@ -1,5 +1,5 @@
-// Goot — Lightweight goot.ini / goot.toml Configuration Parser in Goose
-// Loads ~/.config/goot/goot.ini (with fallback to goot.toml), zero heap allocations.
+// Goosy — Lightweight goosy.ini / goosy.toml Configuration Parser in Goose
+// Loads ~/.config/goosy/goosy.ini (with fallback to goosy.toml), zero heap allocations.
 
 namespace config;
 
@@ -259,7 +259,7 @@ fn try_load_path(cfg: Config&, path: const u8[:]) -> bool {
     return false;
 }
 
-// Load ~/.config/goosy/goosy.ini (or fallback goot.ini, goosy.toml, goot.toml).
+// Load ~/.config/goosy/goosy.ini (or fallback goosy.ini, goosy.toml, goosy.toml).
 fn load_user_config() -> Config {
     var cfg = default_config();
     var env_buf: u8[512] = [0; 512];
@@ -293,10 +293,10 @@ fn load_user_config() -> Config {
     p_cfg.append("config.ini");
     if try_load_path(cfg, p_cfg) { return cfg; }
 
-    // 3. Try legacy ~/.config/goot/goot.ini
+    // 3. Try legacy ~/.config/goot/goosy.ini
     var p_leg_ini: u8[>..] = [];
     p_leg_ini.append(base_legacy);
-    p_leg_ini.append("goot.ini");
+    p_leg_ini.append("goosy.ini");
     if try_load_path(cfg, p_leg_ini) { return cfg; }
 
     // 4. Try TOML fallbacks
@@ -307,7 +307,7 @@ fn load_user_config() -> Config {
 
     var p_leg_toml: u8[>..] = [];
     p_leg_toml.append(base_legacy);
-    p_leg_toml.append("goot.toml");
+    p_leg_toml.append("goosy.toml");
     let _ = try_load_path(cfg, p_leg_toml);
     return cfg;
 }

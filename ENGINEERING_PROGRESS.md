@@ -31,16 +31,16 @@
 ## Log of Changes
 - `2026-11-22`: Completed initial performance pass: flattened scroll loops (2.4x speedup), zero-division glyph alpha blending (`div255_fast`), 64-bit contiguous fill optimizations, 64 KiB PTY buffer scaling.
 - `2026-11-22`: Created master engineering tracking documents (`ENGINEERING_PLAN.md`, `ENGINEERING_PROGRESS.md`, `BENCHMARK_REPORT.md`, `COMPATIBILITY_MATRIX.md`, `SECURITY_AUDIT.md`, `RELEASE_CHECKLIST.md`).
-- `2026-11-22`: Implemented dynamically growable PTY write FIFO (`native/goot_pty.c`) up to 16 MiB to eliminate silent write truncation and data loss.
-- `2026-11-22`: Hardened Sixel graphics parser (`native/goot_image.c`) against integer overflow, repeat count exhaustion, and memory leaks.
-- `2026-11-22`: Hardened Kitty graphics protocol and PNG decoder (`native/goot_image.c`) with 4096×4096 dimension and 16 MP pixel bounds.
+- `2026-11-22`: Implemented dynamically growable PTY write FIFO (`native/goosy_pty.c`) up to 16 MiB to eliminate silent write truncation and data loss.
+- `2026-11-22`: Hardened Sixel graphics parser (`native/goosy_image.c`) against integer overflow, repeat count exhaustion, and memory leaks.
+- `2026-11-22`: Hardened Kitty graphics protocol and PNG decoder (`native/goosy_image.c`) with 4096×4096 dimension and 16 MP pixel bounds.
 - `2026-11-22`: Normalized CRLF paste handling (`src/input.goose`) to prevent duplicate newlines in shell sessions.
 - `2026-11-22`: Preserved prompt markers (OSC 133) and wrapped row boundaries across window height resizes (`src/screen.goose`).
 - `2026-11-22`: Added Kitty Keyboard Protocol negotiation (`CSI ? u`, `CSI = u`, `CSI > u`, `CSI < u`) in `src/parser.goose`.
 - `2026-11-22`: Created `tests/test_security_fuzz.c` and integrated test suite runner in `scripts/test.sh`.
 - `2026-11-22`: Repaired benchmark harness (`benchmarks/comprehensive_benchmarks.py`) to eliminate hardcoded paths and support dynamic binary discovery.
-- `2026-11-22`: Implemented Kitty Graphics Protocol chunked packet assembly (`m=1`/`m=0`) and targeted deletion by ID (`a=d, i=<id>` / `a=d, d=i, i=<id>`) in `native/goot_image.c`.
-- `2026-11-22`: Enhanced Unicode combining mark support with HarfBuzz ligature shaping and zero-advance overlay fallback in `native/goot_font.c` and `native/goot_render.c`.
+- `2026-11-22`: Implemented Kitty Graphics Protocol chunked packet assembly (`m=1`/`m=0`) and targeted deletion by ID (`a=d, i=<id>` / `a=d, d=i, i=<id>`) in `native/goosy_image.c`.
+- `2026-11-22`: Enhanced Unicode combining mark support with HarfBuzz ligature shaping and zero-advance overlay fallback in `native/goosy_font.c` and `native/goosy_render.c`.
 - `2026-11-22`: Decoupled Wayland `wl_surface_set_buffer_scale` under `wp_viewport` to prevent compositor double-scaling on fractional scale displays.
 - `2026-11-22`: Added prompt-to-prompt command output selection (`Ctrl+Shift+A` and `select_last_command_output`) utilizing OSC 133 semantic prompt integration.
-- `2026-11-22`: Added automated regression tests in `tests/test_goot.goose` and `tests/test_security_fuzz.c` verifying chunked transfer assembly, targeted deletion, combining marks, and output selection.
+- `2026-11-22`: Added automated regression tests in `tests/test_goosy.goose` and `tests/test_security_fuzz.c` verifying chunked transfer assembly, targeted deletion, combining marks, and output selection.

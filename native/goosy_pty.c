@@ -1,5 +1,5 @@
 /*
- * Goot — Linux POSIX PTY, Safe Process Spawner & Environment Helper Bridge
+ * Goosy — Linux POSIX PTY, Safe Process Spawner & Environment Helper Bridge
  * Minimal, auditable C99 implementation for POSIX pseudoterminals.
  * Zero dynamic heap allocations on hot paths; never constructs shell commands.
  */
@@ -7,7 +7,7 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-#include "goot_native.h"
+#include "goosy_native.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -175,38 +175,38 @@ static void parse_cmdline_if_needed(void) {
     g_cmdline_exec_argv[g_cmdline_exec_argc] = NULL;
 }
 
-int32_t goot_cmdline_cols(void) {
+int32_t goosy_cmdline_cols(void) {
     parse_cmdline_if_needed();
     return g_cmdline_cols;
 }
 
-int32_t goot_cmdline_rows(void) {
+int32_t goosy_cmdline_rows(void) {
     parse_cmdline_if_needed();
     return g_cmdline_rows;
 }
 
-int32_t goot_cmdline_has_custom_size(void) {
+int32_t goosy_cmdline_has_custom_size(void) {
     parse_cmdline_if_needed();
     return g_cmdline_has_size ? 1 : 0;
 }
 
-int32_t goot_cmdline_hold(void) {
+int32_t goosy_cmdline_hold(void) {
     parse_cmdline_if_needed();
     return g_cmdline_hold ? 1 : 0;
 }
 
-const char *goot_cmdline_title(void) {
+const char *goosy_cmdline_title(void) {
     parse_cmdline_if_needed();
     return g_cmdline_title[0] != '\0' ? g_cmdline_title : NULL;
 }
 
-const char *goot_cmdline_cwd(void) {
+const char *goosy_cmdline_cwd(void) {
     parse_cmdline_if_needed();
     return g_cmdline_cwd[0] != '\0' ? g_cmdline_cwd : NULL;
 }
 
-int32_t goot_pty_spawn(goot_const_bytes_t shell_override,
-                       goot_const_bytes_t term_env,
+int32_t goosy_pty_spawn(goosy_const_bytes_t shell_override,
+                       goosy_const_bytes_t term_env,
                        int32_t cols, int32_t rows,
                        int32_t width_px, int32_t height_px) {
     if (cols <= 0 || cols > 4096 || rows <= 0 || rows > 4096) {
@@ -358,15 +358,15 @@ int32_t goot_pty_spawn(goot_const_bytes_t shell_override,
     return 0;
 }
 
-int32_t goot_pty_fd(void) {
+int32_t goosy_pty_fd(void) {
     return (int32_t)g_master_fd;
 }
 
-int32_t goot_pty_child_pid(void) {
+int32_t goosy_pty_child_pid(void) {
     return (int32_t)g_child_pid;
 }
 
-int64_t goot_pty_read(goot_bytes_t buf) {
+int64_t goosy_pty_read(goosy_bytes_t buf) {
     if (g_master_fd < 0 || !buf.data || buf.len <= 0) {
         return -1;
     }
@@ -437,11 +437,11 @@ static bool pty_write_buf_grow(size_t needed) {
     return true;
 }
 
-int32_t goot_pty_has_pending_write(void) {
+int32_t goosy_pty_has_pending_write(void) {
     return pty_write_buf_len() > 0 ? 1 : 0;
 }
 
-int64_t goot_pty_flush(void) {
+int64_t goosy_pty_flush(void) {
     if (g_master_fd < 0 || !g_write_buf || g_write_cap == 0) return -1;
     while (g_write_head != g_write_tail) {
         size_t chunk = (g_write_tail > g_write_head) ? (g_write_tail - g_write_head) : (g_write_cap - g_write_head);
@@ -460,7 +460,7 @@ int64_t goot_pty_flush(void) {
     return (int64_t)pty_write_buf_len();
 }
 
-int64_t goot_pty_write(goot_const_bytes_t data) {
+int64_t goosy_pty_write(goosy_const_bytes_t data) {
     if (g_master_fd < 0 || !data.data || data.len <= 0) {
         return 0;
     }
@@ -471,7 +471,7 @@ int64_t goot_pty_write(goot_const_bytes_t data) {
         g_write_tail = 0;
     }
     if (g_write_head != g_write_tail) {
-        goot_pty_flush();
+        goosy_pty_flush();
     }
     size_t written = 0;
     if (g_write_head == g_write_tail) {
@@ -506,7 +506,7 @@ int64_t goot_pty_write(goot_const_bytes_t data) {
     return (int64_t)written;
 }
 
-int32_t goot_pty_resize(int32_t cols, int32_t rows, int32_t width_px, int32_t height_px) {
+int32_t goosy_pty_resize(int32_t cols, int32_t rows, int32_t width_px, int32_t height_px) {
     if (g_master_fd < 0 || cols <= 0 || cols > 4096 || rows <= 0 || rows > 4096) {
         return -1;
     }
@@ -522,7 +522,7 @@ int32_t goot_pty_resize(int32_t cols, int32_t rows, int32_t width_px, int32_t he
     return 0;
 }
 
-int32_t goot_pty_check_child(void) {
+int32_t goosy_pty_check_child(void) {
     if (g_child_exited) {
         return 1;
     }
@@ -554,11 +554,11 @@ int32_t goot_pty_check_child(void) {
     return -1;
 }
 
-int32_t goot_pty_exit_code(void) {
+int32_t goosy_pty_exit_code(void) {
     return g_exit_code;
 }
 
-void goot_pty_close(void) {
+void goosy_pty_close(void) {
     if (g_write_buf) {
         free(g_write_buf);
         g_write_buf = NULL;
@@ -595,7 +595,7 @@ void goot_pty_close(void) {
 /* -------------------------------------------------------------------------
  * Safe New-Terminal Spawner (Ctrl+Shift+N with OSC 7 CWD) & URL Opener
  * ------------------------------------------------------------------------- */
-int32_t goot_spawn_self(goot_const_bytes_t cwd) {
+int32_t goosy_spawn_self(goosy_const_bytes_t cwd) {
     char exe_path[1024];
     ssize_t elen = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (elen <= 0) {
@@ -636,7 +636,7 @@ int32_t goot_spawn_self(goot_const_bytes_t cwd) {
     return 0;
 }
 
-int32_t goot_validate_url(goot_const_bytes_t url) {
+int32_t goosy_validate_url(goosy_const_bytes_t url) {
     if (!url.data || url.len < 8 || url.len >= 2048) {
         return 0;
     }
@@ -655,8 +655,8 @@ int32_t goot_validate_url(goot_const_bytes_t url) {
     return 1;
 }
 
-int32_t goot_open_url(goot_const_bytes_t url) {
-    if (!goot_validate_url(url)) {
+int32_t goosy_open_url(goosy_const_bytes_t url) {
+    if (!goosy_validate_url(url)) {
         return -1;
     }
     char url_buf[2048];
@@ -696,7 +696,7 @@ int32_t goot_open_url(goot_const_bytes_t url) {
 /* -------------------------------------------------------------------------
  * Safe Environment & Config File Read Helpers
  * ------------------------------------------------------------------------- */
-int64_t goot_env_get(goot_const_bytes_t name, goot_bytes_t out_buf) {
+int64_t goosy_env_get(goosy_const_bytes_t name, goosy_bytes_t out_buf) {
     if (!name.data || name.len <= 0 || name.len >= 256 || !out_buf.data || out_buf.len <= 0) {
         return -1;
     }
@@ -715,7 +715,7 @@ int64_t goot_env_get(goot_const_bytes_t name, goot_bytes_t out_buf) {
     return (int64_t)vlen;
 }
 
-int64_t goot_file_read(goot_const_bytes_t path, goot_bytes_t out_buf) {
+int64_t goosy_file_read(goosy_const_bytes_t path, goosy_bytes_t out_buf) {
     if (!path.data || path.len <= 0 || path.len >= 1024 || !out_buf.data || out_buf.len <= 0) {
         return -1;
     }
@@ -759,11 +759,11 @@ static void get_state_geometry_path(char *out, size_t cap) {
 static void get_legacy_state_geometry_path(char *out, size_t cap) {
     const char *state_home = getenv("XDG_STATE_HOME");
     if (state_home && state_home[0] == '/') {
-        snprintf(out, cap, "%s/goot/window_geometry", state_home);
+        snprintf(out, cap, "%s/goosy/window_geometry", state_home);
     } else {
         const char *home = getenv("HOME");
         if (!home || home[0] != '/') home = "/tmp";
-        snprintf(out, cap, "%s/.local/state/goot/window_geometry", home);
+        snprintf(out, cap, "%s/.local/state/goosy/window_geometry", home);
     }
 }
 
@@ -796,17 +796,17 @@ static void load_state_if_needed(void) {
     }
 }
 
-int32_t goot_state_load_cols(void) {
+int32_t goosy_state_load_cols(void) {
     load_state_if_needed();
     return g_saved_cols;
 }
 
-int32_t goot_state_load_rows(void) {
+int32_t goosy_state_load_rows(void) {
     load_state_if_needed();
     return g_saved_rows;
 }
 
-void goot_state_save_geometry(int32_t cols, int32_t rows) {
+void goosy_state_save_geometry(int32_t cols, int32_t rows) {
     if (cols < 20 || rows < 5 || cols > 500 || rows > 200) return;
     char path[1024];
     get_state_geometry_path(path, sizeof(path));

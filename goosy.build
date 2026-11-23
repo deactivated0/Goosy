@@ -1,15 +1,15 @@
-// Goot — Goose Sidecar Build Configuration (docs/packages.md §3)
+// Goosy — Goose Sidecar Build Configuration (docs/packages.md §3)
 // Run ./scripts/build.sh first to generate Wayland xdg-shell protocol bindings
 // under native/generated/ and verify pkg-config include paths on Artix Linux.
 
 c_sources = [
-    "native/goot_pty.c",
-    "native/goot_poll.c",
-    "native/goot_xkb.c",
-    "native/goot_wayland.c",
-    "native/goot_font.c",
-    "native/goot_render.c",
-    "native/goot_image.c",
+    "native/goosy_pty.c",
+    "native/goosy_poll.c",
+    "native/goosy_xkb.c",
+    "native/goosy_wayland.c",
+    "native/goosy_font.c",
+    "native/goosy_render.c",
+    "native/goosy_image.c",
     "native/generated/xdg-shell-protocol.c",
     "native/generated/xdg-decoration-unstable-v1-protocol.c",
     "native/generated/primary-selection-unstable-v1-protocol.c",
@@ -28,7 +28,7 @@ c_include = [
 c_defines = [
     "_POSIX_C_SOURCE=200809L",
     "_GNU_SOURCE",
-    "GOOT_WITH_GOOSE_H=1",
+    "GOOSY_WITH_GOOSE_H=1",
 ];
 
 c_flags_cc = [
@@ -52,4 +52,4 @@ c_libs_linux = [
 ];
 
 main_thread_only = true;
-output = "goot";
+output = "goosy";

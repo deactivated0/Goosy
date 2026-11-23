@@ -1,4 +1,4 @@
-// Goot — Color Palette Management (16-color, 256-color xterm, 24-bit True Color)
+// Goosy — Color Palette Management (16-color, 256-color xterm, 24-bit True Color)
 // Default aesthetic: Foot/Kitty-inspired dark theme (#080808 bg, #EAEAEA fg).
 
 namespace colors;

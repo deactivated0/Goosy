@@ -1,4 +1,4 @@
-// Goot — Interactive Modes in Goose:
+// Goosy — Interactive Modes in Goose:
 //   1. Scrollback Search Mode (Ctrl+Shift+R, Ctrl+R/S, Ctrl+W/Shift+W, Paste, Return, Esc/Ctrl+G)
 //   2. URL Jump-Label Mode (Ctrl+Shift+O, 't' toggle URL in label, Esc/Ctrl+C/G/D)
 //   3. Unicode Input Mode (Ctrl+Shift+U, hex entry, Return/Space commit, Esc/Ctrl+C/G)

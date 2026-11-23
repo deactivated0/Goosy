@@ -1,4 +1,4 @@
-// Goot — Damage-Tracked Software Renderer Driver in Goose
+// Goosy — Damage-Tracked Software Renderer Driver in Goose
 // Renders terminal cells, cursor with glyph inversion, selection highlights,
 // URL jump labels, search/unicode overlay bars, and native Wayland CSD title bar.
 

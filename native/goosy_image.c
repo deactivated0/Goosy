@@ -1,11 +1,11 @@
 /*
- * Goot — Terminal Graphics Bridge (Sixel & Kitty Graphics Protocols)
+ * Goosy — Terminal Graphics Bridge (Sixel & Kitty Graphics Protocols)
  * Software decoding and Pixman compositing for inline images.
  */
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "goot_image.h"
+#include "goosy_image.h"
 
 #include <png.h>
 #include <stdio.h>
@@ -71,7 +71,7 @@ static void free_image_slot(int32_t idx) {
     }
 }
 
-void goot_image_clear(void) {
+void goosy_image_clear(void) {
     for (int32_t i = 0; i < g_image_count; i++) {
         free_image_slot(i);
     }
@@ -79,11 +79,11 @@ void goot_image_clear(void) {
     reset_kitty_chunk();
 }
 
-void goot_image_close(void) {
-    goot_image_clear();
+void goosy_image_close(void) {
+    goosy_image_clear();
 }
 
-void goot_image_scroll(int32_t evicted_lines) {
+void goosy_image_scroll(int32_t evicted_lines) {
     if (evicted_lines <= 0 || g_image_count == 0) return;
     int32_t write_idx = 0;
     for (int32_t i = 0; i < g_image_count; i++) {
@@ -143,7 +143,7 @@ static int32_t add_image(uint32_t user_id, int32_t col, int32_t abs_row, int32_t
     return (h + ch - 1) / ch;
 }
 
-void goot_image_render(pixman_image_t *dest, int32_t pad_px, int32_t title_h,
+void goosy_image_render(pixman_image_t *dest, int32_t pad_px, int32_t title_h,
                       int32_t view_top_abs_row, int32_t rows, int32_t cols,
                       int32_t cell_w, int32_t cell_h) {
     (void)cols;
@@ -169,7 +169,7 @@ void goot_image_render(pixman_image_t *dest, int32_t pad_px, int32_t title_h,
 /* -------------------------------------------------------------------------
  * Sixel Graphics Decoder
  * ------------------------------------------------------------------------- */
-int32_t goot_sixel_decode(goot_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h) {
+int32_t goosy_sixel_decode(goosy_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h) {
     (void)cell_w;
     if (!data.data || data.len < 2) return 0;
 
@@ -387,7 +387,7 @@ static void png_mem_reader(png_structp png_ptr, png_bytep out_bytes, png_size_t 
     s->off += count;
 }
 
-uint32_t *goot_decode_png_to_argb(const uint8_t *data, size_t len, int32_t *out_w, int32_t *out_h) {
+uint32_t *goosy_decode_png_to_argb(const uint8_t *data, size_t len, int32_t *out_w, int32_t *out_h) {
     if (!data || len < 8 || png_sig_cmp((png_const_bytep)data, 0, 8) != 0) return NULL;
 
     png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -469,7 +469,7 @@ uint32_t *goot_decode_png_to_argb(const uint8_t *data, size_t len, int32_t *out_
     return pixels;
 }
 
-int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h) {
+int32_t goosy_kitty_graphics(goosy_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h) {
     (void)cell_w;
     if (!data.data || data.len < 2) return 0;
 
@@ -516,8 +516,8 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
         char rep[64];
         int rlen = snprintf(rep, sizeof(rep), "\x1b_Gi=%d;OK\x1b\\", (int)image_id);
         if (rlen > 0) {
-            goot_const_bytes_t resp = { (const uint8_t *)rep, rlen };
-            goot_pty_write(resp);
+            goosy_const_bytes_t resp = { (const uint8_t *)rep, rlen };
+            goosy_pty_write(resp);
         }
         return 0;
     }
@@ -537,7 +537,7 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
             }
             g_image_count = write_idx;
         } else {
-            goot_image_clear();
+            goosy_image_clear();
         }
         return 0;
     }
@@ -631,7 +631,7 @@ int32_t goot_kitty_graphics(goot_const_bytes_t data, int32_t col, int32_t abs_ro
 
     if (format == 100) {
         /* PNG format */
-        pixels = goot_decode_png_to_argb(decoded, (size_t)dec_len, &w, &h);
+        pixels = goosy_decode_png_to_argb(decoded, (size_t)dec_len, &w, &h);
     } else if (format == 32 && w > 0 && h > 0) {
         /* Raw RGBA */
         pixels = (uint32_t *)malloc((size_t)w * (size_t)h * sizeof(uint32_t));

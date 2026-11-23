@@ -28,13 +28,13 @@ fi
 
 if [ -f "$ROOT_DIR/doc/goosy.ini.5" ]; then
     install -m 644 "$ROOT_DIR/doc/goosy.ini.5" "$MAN_DIR/goosy.ini.5"
-    ln -sf goosy.ini.5 "$MAN_DIR/goot.ini.5"
+    ln -sf goosy.ini.5 "$MAN_DIR/goosy.ini.5"
 fi
 
 if [ ! -f "$CFG_DIR/goosy.ini" ]; then
-    if [ -f "$LEGACY_CFG_DIR/goot.ini" ]; then
-        cp "$LEGACY_CFG_DIR/goot.ini" "$CFG_DIR/goosy.ini"
-        echo "[goosy] Migrated existing config from $LEGACY_CFG_DIR/goot.ini to $CFG_DIR/goosy.ini"
+    if [ -f "$LEGACY_CFG_DIR/goosy.ini" ]; then
+        cp "$LEGACY_CFG_DIR/goosy.ini" "$CFG_DIR/goosy.ini"
+        echo "[goosy] Migrated existing config from $LEGACY_CFG_DIR/goosy.ini to $CFG_DIR/goosy.ini"
     elif [ -f "$ROOT_DIR/config/goosy.ini" ]; then
         install -m 644 "$ROOT_DIR/config/goosy.ini" "$CFG_DIR/goosy.ini"
         echo "[goosy] Installed default config to $CFG_DIR/goosy.ini"
@@ -47,26 +47,26 @@ fi
 ICON_SRC=""
 if [ -f "$ROOT_DIR/assets/goosy.png" ]; then
     ICON_SRC="$ROOT_DIR/assets/goosy.png"
-elif [ -f "$ROOT_DIR/assets/goot.png" ]; then
-    ICON_SRC="$ROOT_DIR/assets/goot.png"
+elif [ -f "$ROOT_DIR/assets/goosy.png" ]; then
+    ICON_SRC="$ROOT_DIR/assets/goosy.png"
 fi
 
 if [ -n "$ICON_SRC" ]; then
     ICON_BASE="$PREFIX/share/icons/hicolor"
     mkdir -p "$PREFIX/share/pixmaps"
     install -m 644 "$ICON_SRC" "$PREFIX/share/pixmaps/goosy.png"
-    ln -sf goosy.png "$PREFIX/share/pixmaps/goot.png"
+    ln -sf goosy.png "$PREFIX/share/pixmaps/goosy.png"
     for sz in 16 24 32 48 64 128 256 512; do
         mkdir -p "$ICON_BASE/${sz}x${sz}/apps"
         if command -v magick >/dev/null 2>&1; then
             magick "$ICON_SRC" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
-            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goot.png"
+            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
         elif command -v convert >/dev/null 2>&1; then
             convert "$ICON_SRC" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
-            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goot.png"
+            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
         else
             install -m 644 "$ICON_SRC" "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
-            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goot.png"
+            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
         fi
     done
 fi
@@ -84,7 +84,7 @@ Categories=System;TerminalEmulator;
 StartupNotify=false
 EOF
 
-ln -sf goosy.desktop "$APP_DIR/goot.desktop"
+ln -sf goosy.desktop "$APP_DIR/goosy.desktop"
 
 echo "[goosy] Installed to $BIN_DIR/goosy (with $BIN_DIR/goot symlink) and $MAN_DIR/goosy.ini.5"
 echo "[goosy] Run 'man goosy.ini' to view configuration and shortcut documentation."

@@ -40,7 +40,7 @@
 ### Phase 2: Security & Memory Safety
 - [ ] **Sixel Parsing Hardening:**
   - Enforce max dimension limits (e.g. 4096×4096) to prevent integer overflow and memory exhaustion DOS.
-  - Fix memory leak on `tight` allocation failure in `goot_sixel_decode`.
+  - Fix memory leak on `tight` allocation failure in `goosy_sixel_decode`.
 - [ ] **Kitty Graphics Hardening:**
   - Enforce bounds on base64 decoding and payload lengths.
   - Route response query acknowledgments through the thread-safe PTY write queue instead of direct raw `write()`.

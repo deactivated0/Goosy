@@ -1,10 +1,10 @@
 /*
- * Goot — libxkbcommon Keyboard Translation Bridge
+ * Goosy — libxkbcommon Keyboard Translation Bridge
  */
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "goot_native.h"
+#include "goosy_native.h"
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -19,7 +19,7 @@ static xkb_mod_index_t g_mod_ctrl  = XKB_MOD_INVALID;
 static xkb_mod_index_t g_mod_alt   = XKB_MOD_INVALID;
 static xkb_mod_index_t g_mod_super = XKB_MOD_INVALID;
 
-int32_t goot_xkb_init(void) {
+int32_t goosy_xkb_init(void) {
     if (g_xkb_ctx) {
         return 0;
     }
@@ -27,7 +27,7 @@ int32_t goot_xkb_init(void) {
     return g_xkb_ctx ? 0 : -1;
 }
 
-int32_t goot_xkb_set_keymap_fd(int32_t fd, uint32_t size) {
+int32_t goosy_xkb_set_keymap_fd(int32_t fd, uint32_t size) {
     if (!g_xkb_ctx || fd < 0 || size == 0 || size > (16U * 1024U * 1024U)) {
         if (fd >= 0) close(fd);
         return -1;
@@ -66,35 +66,35 @@ int32_t goot_xkb_set_keymap_fd(int32_t fd, uint32_t size) {
     return 0;
 }
 
-void goot_xkb_update_mods(uint32_t depressed, uint32_t latched,
+void goosy_xkb_update_mods(uint32_t depressed, uint32_t latched,
                           uint32_t locked, uint32_t group) {
     if (!g_xkb_state) return;
     xkb_state_update_mask(g_xkb_state, depressed, latched, locked, 0, 0, group);
 }
 
-int32_t goot_xkb_current_mods(void) {
+int32_t goosy_xkb_current_mods(void) {
     if (!g_xkb_state) return 0;
     int32_t m = 0;
     if (g_mod_shift != XKB_MOD_INVALID &&
         xkb_state_mod_index_is_active(g_xkb_state, g_mod_shift, XKB_STATE_MODS_EFFECTIVE) > 0) {
-        m |= GOOT_MOD_SHIFT;
+        m |= GOOSY_MOD_SHIFT;
     }
     if (g_mod_ctrl != XKB_MOD_INVALID &&
         xkb_state_mod_index_is_active(g_xkb_state, g_mod_ctrl, XKB_STATE_MODS_EFFECTIVE) > 0) {
-        m |= GOOT_MOD_CTRL;
+        m |= GOOSY_MOD_CTRL;
     }
     if (g_mod_alt != XKB_MOD_INVALID &&
         xkb_state_mod_index_is_active(g_xkb_state, g_mod_alt, XKB_STATE_MODS_EFFECTIVE) > 0) {
-        m |= GOOT_MOD_ALT;
+        m |= GOOSY_MOD_ALT;
     }
     if (g_mod_super != XKB_MOD_INVALID &&
         xkb_state_mod_index_is_active(g_xkb_state, g_mod_super, XKB_STATE_MODS_EFFECTIVE) > 0) {
-        m |= GOOT_MOD_SUPER;
+        m |= GOOSY_MOD_SUPER;
     }
     return m;
 }
 
-int32_t goot_xkb_translate_key(uint32_t keycode, bool pressed,
+int32_t goosy_xkb_translate_key(uint32_t keycode, bool pressed,
                                uint32_t *out_keysym, int32_t *out_mods,
                                uint8_t *utf8_buf, int32_t utf8_cap,
                                int32_t *out_utf8_len) {
@@ -104,7 +104,7 @@ int32_t goot_xkb_translate_key(uint32_t keycode, bool pressed,
     xkb_keycode_t xkb_kc = (xkb_keycode_t)(keycode + 8U);
     xkb_keysym_t sym = xkb_state_key_get_one_sym(g_xkb_state, xkb_kc);
     *out_keysym = (uint32_t)sym;
-    *out_mods   = goot_xkb_current_mods();
+    *out_mods   = goosy_xkb_current_mods();
     *out_utf8_len = 0;
 
     if (utf8_buf && utf8_cap > 0) {
@@ -116,7 +116,7 @@ int32_t goot_xkb_translate_key(uint32_t keycode, bool pressed,
     return 1;
 }
 
-void goot_xkb_close(void) {
+void goosy_xkb_close(void) {
     if (g_xkb_state) { xkb_state_unref(g_xkb_state); g_xkb_state = NULL; }
     if (g_xkb_map)   { xkb_keymap_unref(g_xkb_map);  g_xkb_map = NULL; }
     if (g_xkb_ctx)   { xkb_context_unref(g_xkb_ctx); g_xkb_ctx = NULL; }

@@ -1,4 +1,4 @@
-// Goot — Terminal Screen Grid, Alternate Buffer, Bounded Scrollback,
+// Goosy — Terminal Screen Grid, Alternate Buffer, Bounded Scrollback,
 // Selection Modes (Char, Block, Word, Quote, Line), OSC 7 CWD & OSC 133 Prompts
 
 namespace screen;

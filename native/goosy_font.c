@@ -1,12 +1,12 @@
 /*
- * Goot — FreeType2 + Fontconfig + HarfBuzz Font & Glyph Cache Bridge
+ * Goosy — FreeType2 + Fontconfig + HarfBuzz Font & Glyph Cache Bridge
  * Uses a bounded open-addressed glyph cache to keep RAM tiny and avoid
  * per-frame rasterization or heap churn.
  */
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "goot_native.h"
+#include "goosy_native.h"
 
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
@@ -22,7 +22,7 @@
 typedef struct {
     uint64_t     key; /* (codepoint << 8) | style_flags */
     bool         used;
-    goot_glyph_t glyph;
+    goosy_glyph_t glyph;
 } glyph_entry_t;
 
 static FT_Library    g_ft         = NULL;
@@ -87,7 +87,7 @@ static FT_Face find_fallback_face(uint32_t codepoint) {
 }
 
 static glyph_entry_t g_cache[GLYPH_CACHE_CAP];
-static const goot_glyph_t *g_ascii_cache[128][4];
+static const goosy_glyph_t *g_ascii_cache[128][4];
 
 static void clear_glyph_cache(void) {
     memset((void *)g_ascii_cache, 0, sizeof(g_ascii_cache));
@@ -141,7 +141,7 @@ static void update_metrics(void) {
     g_baseline = asc > 0 ? asc : (g_cell_h - 3);
 }
 
-int32_t goot_font_init(goot_const_bytes_t family, int32_t size_pt, int32_t dpi, int32_t line_spacing_px) {
+int32_t goosy_font_init(goosy_const_bytes_t family, int32_t size_pt, int32_t dpi, int32_t line_spacing_px) {
     if (!FcInit()) return -1;
     if (FT_Init_FreeType(&g_ft) != 0) return -1;
 
@@ -168,7 +168,7 @@ int32_t goot_font_init(goot_const_bytes_t family, int32_t size_pt, int32_t dpi, 
     return 0;
 }
 
-int32_t goot_font_resize(int32_t size_pt, int32_t dpi) {
+int32_t goosy_font_resize(int32_t size_pt, int32_t dpi) {
     if (!g_face_reg) return -1;
     if (size_pt < 6 || size_pt > 72 || dpi < 72 || dpi > 384) return -1;
     g_size_pt = size_pt;
@@ -187,11 +187,11 @@ int32_t goot_font_resize(int32_t size_pt, int32_t dpi) {
     return 0;
 }
 
-int32_t goot_font_cell_width(void)  { return g_cell_w; }
-int32_t goot_font_cell_height(void) { return g_cell_h; }
-int32_t goot_font_baseline(void)    { return g_baseline; }
+int32_t goosy_font_cell_width(void)  { return g_cell_w; }
+int32_t goosy_font_cell_height(void) { return g_cell_h; }
+int32_t goosy_font_baseline(void)    { return g_baseline; }
 
-const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags) {
+const goosy_glyph_t *goosy_font_get_glyph(uint32_t codepoint, uint8_t style_flags) {
     uint8_t style = style_flags & 0x03U;
     if (codepoint < 128 && g_ascii_cache[codepoint][style]) {
         return g_ascii_cache[codepoint][style];
@@ -273,7 +273,7 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
         load_flags = FT_LOAD_RENDER | FT_LOAD_COLOR;
     }
 
-    goot_glyph_t *g = &g_cache[idx].glyph;
+    goosy_glyph_t *g = &g_cache[idx].glyph;
     memset(g, 0, sizeof(*g));
     g_cache[idx].key  = key;
     g_cache[idx].used = true;
@@ -310,7 +310,7 @@ const goot_glyph_t *goot_font_get_glyph(uint32_t codepoint, uint8_t style_flags)
     return g;
 }
 
-const goot_glyph_t *goot_font_shape_ligature(const uint32_t *cps, int32_t len, uint8_t style_flags) {
+const goosy_glyph_t *goosy_font_shape_ligature(const uint32_t *cps, int32_t len, uint8_t style_flags) {
     if (!g_hb_reg || !cps || len < 2 || len > 4) return NULL;
     FT_Face face = g_face_reg;
     if ((style_flags & 1) && g_face_bold) face = g_face_bold;
@@ -319,7 +319,7 @@ const goot_glyph_t *goot_font_shape_ligature(const uint32_t *cps, int32_t len, u
     hb_buffer_t *buf = hb_buffer_create();
     if (!buf) return NULL;
     hb_buffer_add_codepoints(buf, cps, len, 0, len);
-    if (goot_font_is_rtl(cps[0])) {
+    if (goosy_font_is_rtl(cps[0])) {
         hb_buffer_set_direction(buf, HB_DIRECTION_RTL);
         hb_buffer_set_script(buf, HB_SCRIPT_ARABIC);
     } else {
@@ -333,7 +333,7 @@ const goot_glyph_t *goot_font_shape_ligature(const uint32_t *cps, int32_t len, u
         uint32_t gid = infos[0].codepoint;
         hb_buffer_destroy(buf);
         if (FT_Load_Glyph(face, gid, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) == 0) {
-            static goot_glyph_t s_lig;
+            static goosy_glyph_t s_lig;
             static uint8_t *s_lig_bmp = NULL;
             if (s_lig_bmp) { free(s_lig_bmp); s_lig_bmp = NULL; }
             FT_GlyphSlot slot = face->glyph;
@@ -364,13 +364,13 @@ const goot_glyph_t *goot_font_shape_ligature(const uint32_t *cps, int32_t len, u
     return NULL;
 }
 
-int32_t goot_font_is_rtl(uint32_t cp) {
+int32_t goosy_font_is_rtl(uint32_t cp) {
     return ((cp >= 0x0590 && cp <= 0x08FF) ||
             (cp >= 0xFB1D && cp <= 0xFDFF) ||
             (cp >= 0xFE70 && cp <= 0xFEFF)) ? 1 : 0;
 }
 
-void goot_font_close(void) {
+void goosy_font_close(void) {
     clear_glyph_cache();
     for (int32_t i = 0; i < g_fallback_count; i++) {
         if (g_fallback_faces[i]) {

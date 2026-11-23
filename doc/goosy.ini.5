@@ -1,16 +1,16 @@
-.TH GOOT.INI 5 "2026-11-22" "Goot 0.2.0" "File Formats Manual"
+.TH GOOSY.INI 5 "2026-11-22" "Goosy 0.2.0" "File Formats Manual"
 .SH NAME
-goot.ini \- configuration file for Goot native Wayland terminal emulator
+goosy.ini \- configuration file for Goosy native Wayland terminal emulator
 .SH SYNOPSIS
-.I $XDG_CONFIG_HOME/goot/goot.ini
+.I $XDG_CONFIG_HOME/goosy/goosy.ini
 .br
-.I ~/.config/goot/goot.ini
+.I ~/.config/goosy/goosy.ini
 .SH DESCRIPTION
-.B goot
+.B goosy
 reads its configuration from
-.I goot.ini
+.I goosy.ini
 (falling back to
-.I goot.toml
+.I goosy.toml
 if present). All sections and keys are optional.
 .SH SECTIONS
 .TP
@@ -74,7 +74,7 @@ if present). All sections and keys are optional.
 .IP \(bu 2
 \fBCtrl++, Ctrl+=\fR / \fBCtrl+-\fR / \fBCtrl+0\fR: Increase, decrease, reset font size
 .IP \(bu 2
-\fBCtrl+Shift+N\fR: Spawn a new Goot terminal (honors OSC 7 CWD)
+\fBCtrl+Shift+N\fR: Spawn a new Goosy terminal (honors OSC 7 CWD)
 .IP \(bu 2
 \fBCtrl+Shift+O\fR: Enter URL mode
 .IP \(bu 2
@@ -109,4 +109,4 @@ if present). All sections and keys are optional.
 .IP \(bu 2
 \fBTouch tap / drag / long-press+drag\fR: Left click / scroll history / text selection
 .SH SEE ALSO
-.BR goot (1)
+.BR goosy (1)

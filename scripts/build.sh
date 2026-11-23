@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
-# Goot build script — Artix Linux x86_64 (no systemd required)
+# Goosy build script — Artix Linux x86_64 (no systemd required)
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT_DIR"
 
-echo "[goot] Checking Goose compiler..."
+echo "[goosy] Checking Goose compiler..."
 if ! command -v goose >/dev/null 2>&1; then
     echo "ERROR: 'goose' compiler not found in PATH." >&2
     echo "Install from https://github.com/aardappel/goose and ensure 'goose' is in PATH." >&2
@@ -22,7 +22,7 @@ fi
 goose version || true
 goose toolchain || true
 
-echo "[goot] Checking required native tools and development libraries..."
+echo "[goosy] Checking required native tools and development libraries..."
 for tool in pkg-config wayland-scanner; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "ERROR: Required tool '$tool' not found." >&2
@@ -45,7 +45,7 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-echo "[goot] Generating Wayland protocol bindings..."
+echo "[goosy] Generating Wayland protocol bindings..."
 WL_PROTO_DIR=$(pkg-config --variable=pkgdatadir wayland-protocols)
 XDG_XML="$WL_PROTO_DIR/stable/xdg-shell/xdg-shell.xml"
 DECO_XML="$WL_PROTO_DIR/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml"

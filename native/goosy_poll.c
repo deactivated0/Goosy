@@ -1,12 +1,12 @@
 /*
- * Goot — Linux epoll + signalfd Event Loop Bridge
+ * Goosy — Linux epoll + signalfd Event Loop Bridge
  * Blocks cleanly with zero busy-waiting when idle.
  */
 
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-#include "goot_native.h"
+#include "goosy_native.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -31,11 +31,11 @@ static int g_timer_fd = -1;
 static uint32_t g_pty_events = EPOLLIN;
 static volatile int g_terminated = 0;
 
-int32_t goot_poll_terminated(void) {
+int32_t goosy_poll_terminated(void) {
     return g_terminated;
 }
 
-void goot_poll_arm_repeat(int32_t delay_ms, int32_t interval_ms) {
+void goosy_poll_arm_repeat(int32_t delay_ms, int32_t interval_ms) {
     if (g_timer_fd < 0) return;
     struct itimerspec its;
     memset(&its, 0, sizeof(its));
@@ -48,14 +48,14 @@ void goot_poll_arm_repeat(int32_t delay_ms, int32_t interval_ms) {
     timerfd_settime(g_timer_fd, 0, &its, NULL);
 }
 
-void goot_poll_disarm_repeat(void) {
+void goosy_poll_disarm_repeat(void) {
     if (g_timer_fd < 0) return;
     struct itimerspec its;
     memset(&its, 0, sizeof(its));
     timerfd_settime(g_timer_fd, 0, &its, NULL);
 }
 
-int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
+int32_t goosy_poll_init(int32_t wl_fd, int32_t pty_fd) {
     g_epfd = epoll_create1(EPOLL_CLOEXEC);
     if (g_epfd < 0) {
         return -1;
@@ -86,7 +86,7 @@ int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
     ev.events = EPOLLIN;
     ev.data.u32 = TAG_SIGNAL;
     if (epoll_ctl(g_epfd, EPOLL_CTL_ADD, g_sigfd, &ev) < 0) {
-        goot_poll_close();
+        goosy_poll_close();
         return -1;
     }
 
@@ -94,7 +94,7 @@ int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
         ev.events = EPOLLIN;
         ev.data.u32 = TAG_WAYLAND;
         if (epoll_ctl(g_epfd, EPOLL_CTL_ADD, wl_fd, &ev) < 0) {
-            goot_poll_close();
+            goosy_poll_close();
             return -1;
         }
     }
@@ -105,7 +105,7 @@ int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
         ev.events = EPOLLIN;
         ev.data.u32 = TAG_PTY;
         if (epoll_ctl(g_epfd, EPOLL_CTL_ADD, pty_fd, &ev) < 0) {
-            goot_poll_close();
+            goosy_poll_close();
             return -1;
         }
     }
@@ -123,13 +123,13 @@ int32_t goot_poll_init(int32_t wl_fd, int32_t pty_fd) {
     return 0;
 }
 
-int32_t goot_poll_wait(int32_t timeout_ms) {
+int32_t goosy_poll_wait(int32_t timeout_ms) {
     if (g_epfd < 0) {
-        return GOOT_POLL_ERR;
+        return GOOSY_POLL_ERR;
     }
 
     if (g_pty_fd >= 0) {
-        uint32_t wanted = EPOLLIN | (goot_pty_has_pending_write() ? EPOLLOUT : 0);
+        uint32_t wanted = EPOLLIN | (goosy_pty_has_pending_write() ? EPOLLOUT : 0);
         if (wanted != g_pty_events) {
             struct epoll_event ev;
             memset(&ev, 0, sizeof(ev));
@@ -147,10 +147,10 @@ int32_t goot_poll_wait(int32_t timeout_ms) {
     } while (n < 0 && errno == EINTR);
 
     if (n < 0) {
-        return GOOT_POLL_ERR;
+        return GOOSY_POLL_ERR;
     }
     if (n == 0) {
-        return GOOT_POLL_TIMEOUT;
+        return GOOSY_POLL_TIMEOUT;
     }
 
     int32_t mask = 0;
@@ -158,16 +158,16 @@ int32_t goot_poll_wait(int32_t timeout_ms) {
         uint32_t tag = events[i].data.u32;
         uint32_t evs = events[i].events;
         if (tag == TAG_WAYLAND) {
-            mask |= GOOT_POLL_WAYLAND;
+            mask |= GOOSY_POLL_WAYLAND;
         } else if (tag == TAG_PTY) {
             if (evs & EPOLLOUT) {
-                goot_pty_flush();
+                goosy_pty_flush();
             }
             if (evs & EPOLLIN) {
-                mask |= GOOT_POLL_PTY;
+                mask |= GOOSY_POLL_PTY;
             }
             if (evs & (EPOLLHUP | EPOLLERR)) {
-                mask |= GOOT_POLL_PTY_HUP;
+                mask |= GOOSY_POLL_PTY_HUP;
             }
         } else if (tag == TAG_SIGNAL) {
             struct signalfd_siginfo si;
@@ -175,20 +175,20 @@ int32_t goot_poll_wait(int32_t timeout_ms) {
                 if (si.ssi_signo == SIGTERM || si.ssi_signo == SIGINT) {
                     g_terminated = 1;
                 }
-                mask |= GOOT_POLL_SIGNAL;
+                mask |= GOOSY_POLL_SIGNAL;
             }
         } else if (tag == TAG_TIMER) {
             uint64_t exp = 0;
             while (read(g_timer_fd, &exp, sizeof(exp)) == (ssize_t)sizeof(exp)) {
                 (void)exp;
             }
-            mask |= GOOT_POLL_TIMER;
+            mask |= GOOSY_POLL_TIMER;
         }
     }
     return mask;
 }
 
-void goot_poll_close(void) {
+void goosy_poll_close(void) {
     if (g_timer_fd >= 0) {
         close(g_timer_fd);
         g_timer_fd = -1;
@@ -203,7 +203,7 @@ void goot_poll_close(void) {
     }
 }
 
-int64_t goot_time_monotonic_ns(void) {
+int64_t goosy_time_monotonic_ns(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
         return 0;
@@ -211,7 +211,7 @@ int64_t goot_time_monotonic_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
 }
 
-void goot_poll_detach_pty(void) {
+void goosy_poll_detach_pty(void) {
     if (g_epfd >= 0 && g_pty_fd >= 0) {
         epoll_ctl(g_epfd, EPOLL_CTL_DEL, g_pty_fd, NULL);
         g_pty_fd = -1;

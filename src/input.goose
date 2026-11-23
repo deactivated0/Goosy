@@ -1,4 +1,4 @@
-// Goot — Keyboard Escape Translation, Foot-Compatible Shortcuts & Mouse Reporting
+// Goosy — Keyboard Escape Translation, Foot-Compatible Shortcuts & Mouse Reporting
 
 namespace input;
 
@@ -53,7 +53,7 @@ let ACT_PROMPT_PREV: i32    = 13;
 let ACT_PROMPT_NEXT: i32    = 14;
 let ACT_COPY_LAST_OUTPUT: i32 = 15;
 
-// Default Normal-mode shortcuts matching Foot/goot.ini
+// Default Normal-mode shortcuts matching Foot/goosy.ini
 fn check_shortcut(keysym: i32, mods: i32) -> i32 {
     let ctrl  = (mods & ffi::MOD_CTRL) != 0;
     let shift = (mods & ffi::MOD_SHIFT) != 0;

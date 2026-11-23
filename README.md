@@ -30,7 +30,7 @@
 
 ---
 
-**Goosy** (also known as `goot`) is an ultra-fast, lightweight, zero-overhead native Wayland terminal emulator designed for high-performance Linux workflows. 
+**Goosy** is an ultra-fast, lightweight, zero-overhead native Wayland terminal emulator designed for high-performance Linux workflows. 
 
 Engineered in the [Goose programming language](https://aardappel.github.io/goose/) by Wouter van Oortmerssen ([aardappel/goose](https://github.com/aardappel/goose)), Goosy couples a memory-safe, expressive terminal state machine with an auditable, minimal C99 systems substrate for direct Linux POSIX PTY, `epoll`/`signalfd`, native Wayland client protocols (`xdg-shell`, `zxdg_decoration_manager_v1`, `zwp_primary_selection_device_manager_v1`, `wp_fractional_scale_v1`), FreeType2/Fontconfig/HarfBuzz font rasterization, and Pixman software composition.
 
@@ -77,7 +77,7 @@ Tested under Linux 7.3.4 (`x86_64`) on a native Wayland compositor. Measurements
 
 | Terminal Emulator | Binary Size | Cold Startup | Steady Idle RSS | Steady Idle PSS | Idle CPU (2s) | Stream Throughput | Architecture / UI Toolkit |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
-| **Goosy** (`goot`) | **0.30 MB** | **46.1 ms** | **38.6 MB** | **28.5 MB** | **0 ticks (0%)** | **10.4 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
+| **Goosy** | **0.30 MB** | **46.1 ms** | **38.6 MB** | **28.5 MB** | **0 ticks (0%)** | **10.4 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
 | **Foot** | 0.48 MB | 50.4 ms | 21.0 MB | 8.0 MB | 0 ticks (0%) | 37.6 MB/s | Pure C / Custom Wayland |
 | **Alacritty** | 8.30 MB | 150.3 ms | 94.2 MB | 38.0 MB | 0 ticks (0%) | 21.3 MB/s | Rust / OpenGL (winit) |
 | **Kitty** | 0.10 MB* | 260.4 ms | 125.0 MB | 58.0 MB | 0 ticks (0%) | 15.1 MB/s | C + Python + OpenGL (*81 MB runtime) |
@@ -97,8 +97,8 @@ Tested under Linux 7.3.4 (`x86_64`) on a native Wayland compositor. Measurements
 
 ```
 +-----------------------------------------------------------------------------------------+
-|                                   Goot (Goose Core)                                     |
-|  goot.goose: Event loop orchestration, PTY batching, resize & input routing             |
+|                                   Goosy (Goose Core)                                     |
+|  goosy.goose: Event loop orchestration, PTY batching, resize & input routing             |
 |  src/parser.goose   -> VT100/VT220/ECMA-48 state machine                                |
 |  src/screen.goose   -> Root struct Screen (active cells, alt screen, scrollback buffer) |
 |  src/utf8.goose     -> Streaming UTF-8 decoder + WCWidth combining mark calculation     |
@@ -110,13 +110,13 @@ Tested under Linux 7.3.4 (`x86_64`) on a native Wayland compositor. Measurements
                                     |  src/ffi.goose (extern fn, {data, len})
 +-----------------------------------------------------------------------------------------+
 |                               Minimal C99 Bridge (native/)                              |
-|  goot_pty.c     -> Linux POSIX PTY (openpty, forkpty, TIOCSWINSZ, dynamic FIFO buffer)  |
-|  goot_poll.c    -> epoll + signalfd (zero busy-wait idle loop, SIGCHLD handling)        |
-|  goot_wayland.c -> Wayland client (xdg-shell, CSD/SSD, wl_shm, primary selection)       |
-|  goot_xkb.c     -> libxkbcommon keymap & compose sequence UTF-8 translation             |
-|  goot_font.c    -> FreeType2 + Fontconfig + HarfBuzz shaping + LRU glyph cache          |
-|  goot_render.c  -> Pixman software composition + damage bounding rectangle union        |
-|  goot_image.c   -> Kitty graphics chunked reassembly & Sixel decoding engine            |
+|  goosy_pty.c     -> Linux POSIX PTY (openpty, forkpty, TIOCSWINSZ, dynamic FIFO buffer)  |
+|  goosy_poll.c    -> epoll + signalfd (zero busy-wait idle loop, SIGCHLD handling)        |
+|  goosy_wayland.c -> Wayland client (xdg-shell, CSD/SSD, wl_shm, primary selection)       |
+|  goosy_xkb.c     -> libxkbcommon keymap & compose sequence UTF-8 translation             |
+|  goosy_font.c    -> FreeType2 + Fontconfig + HarfBuzz shaping + LRU glyph cache          |
+|  goosy_render.c  -> Pixman software composition + damage bounding rectangle union        |
+|  goosy_image.c   -> Kitty graphics chunked reassembly & Sixel decoding engine            |
 +-----------------------------------------------------------------------------------------+
 ```
 
@@ -363,15 +363,15 @@ Goosy includes an extensive test suite covering unit correctness, C99 POSIX brid
 ```sh
 # 1. Native POSIX PTY + epoll/signalfd + URL security validation
 gcc -O2 -Wall -Wextra -Werror -std=c99 -Inative \
-    native/goot_pty.c native/goot_poll.c tests/test_native_pty_poll.c \
+    native/goosy_pty.c native/goosy_poll.c tests/test_native_pty_poll.c \
     -o /tmp/test_native_pty_poll && /tmp/test_native_pty_poll
 
 # 2. Complete Goose terminal engine test suite
-cd tests && goose run test_goot.goose
+cd tests && goose run test_goosy.goose
 
 # 3. Security fuzzing & image boundary tests
 gcc -O2 -Wall -Wextra -std=c99 -Inative \
-    native/goot_image.c native/goot_render.c tests/test_security_fuzz.c \
+    native/goosy_image.c native/goosy_render.c tests/test_security_fuzz.c \
     $(pkg-config --cflags --libs pixman-1 libpng) \
     -o /tmp/test_security_fuzz && /tmp/test_security_fuzz
 

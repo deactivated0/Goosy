@@ -1,5 +1,5 @@
 /*
- * Goot — Native Wayland Client Bridge
+ * Goosy — Native Wayland Client Bridge
  * Implements libwayland-client, xdg-shell toplevel, wl_shm double buffering,
  * HiDPI scale tracking, frame callbacks, wl_seat keyboard/pointer/touch input,
  * Wayland clipboard (wl_data_device), and primary selection buffer.
@@ -12,7 +12,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
-#include "goot_native.h"
+#include "goosy_native.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -30,9 +30,9 @@
 #include "fractional-scale-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 
-#define GOOT_EV_QUEUE_CAP 256
-#define GOOT_CLIP_MAX     (256 * 1024)
-#define GOOT_MAX_DIM      8192
+#define GOOSY_EV_QUEUE_CAP 256
+#define GOOSY_CLIP_MAX     (256 * 1024)
+#define GOOSY_MAX_DIM      8192
 
 typedef struct {
     int32_t type;
@@ -41,7 +41,7 @@ typedef struct {
     int32_t c;
     uint8_t utf8[16];
     int32_t utf8_len;
-} goot_ev_t;
+} goosy_ev_t;
 
 static struct wl_display             *g_display    = NULL;
 static struct wl_registry            *g_registry   = NULL;
@@ -93,33 +93,33 @@ static bool     g_configured  = false;
 static bool     g_frame_ready = true;
 static uint32_t g_last_serial = 0;
 
-static struct goot_shm_buffer g_bufs[2];
+static struct goosy_shm_buffer g_bufs[2];
 
-static goot_ev_t g_ev_q[GOOT_EV_QUEUE_CAP];
+static goosy_ev_t g_ev_q[GOOSY_EV_QUEUE_CAP];
 static uint32_t  g_ev_head = 0;
 static uint32_t  g_ev_tail = 0;
-static goot_ev_t g_ev_cur;
+static goosy_ev_t g_ev_cur;
 
 /* Clipboard & Primary selection storage */
-static uint8_t  g_clip_copy_buf[GOOT_CLIP_MAX];
+static uint8_t  g_clip_copy_buf[GOOSY_CLIP_MAX];
 static int64_t  g_clip_copy_len = 0;
-static uint8_t  g_clip_paste_buf[GOOT_CLIP_MAX];
+static uint8_t  g_clip_paste_buf[GOOSY_CLIP_MAX];
 static int64_t  g_clip_paste_len = 0;
 
-static uint8_t  g_primary_buf[GOOT_CLIP_MAX];
+static uint8_t  g_primary_buf[GOOSY_CLIP_MAX];
 static int64_t  g_primary_len = 0;
 
-static void push_ev(const goot_ev_t *ev) {
-    uint32_t next = (g_ev_tail + 1U) % GOOT_EV_QUEUE_CAP;
+static void push_ev(const goosy_ev_t *ev) {
+    uint32_t next = (g_ev_tail + 1U) % GOOSY_EV_QUEUE_CAP;
     if (next == g_ev_head) {
-        g_ev_head = (g_ev_head + 1U) % GOOT_EV_QUEUE_CAP;
+        g_ev_head = (g_ev_head + 1U) % GOOSY_EV_QUEUE_CAP;
     }
     g_ev_q[g_ev_tail] = *ev;
     g_ev_tail = next;
 }
 
 static void push_ev3(int32_t type, int32_t a, int32_t b, int32_t c) {
-    goot_ev_t ev;
+    goosy_ev_t ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = type;
     ev.a = a;
@@ -131,7 +131,7 @@ static void push_ev3(int32_t type, int32_t a, int32_t b, int32_t c) {
 /* -------------------------------------------------------------------------
  * wl_shm Double Buffer Lifecycle
  * ------------------------------------------------------------------------- */
-static void destroy_shm_buffer(struct goot_shm_buffer *b) {
+static void destroy_shm_buffer(struct goosy_shm_buffer *b) {
     if (b->wl_buffer) {
         wl_buffer_destroy((struct wl_buffer *)b->wl_buffer);
         b->wl_buffer = NULL;
@@ -145,15 +145,15 @@ static void destroy_shm_buffer(struct goot_shm_buffer *b) {
 
 static void buffer_release(void *data, struct wl_buffer *wl_buf) {
     (void)wl_buf;
-    ((struct goot_shm_buffer *)data)->busy = false;
+    ((struct goosy_shm_buffer *)data)->busy = false;
 }
 
 static const struct wl_buffer_listener g_buffer_listener = {
     .release = buffer_release,
 };
 
-static int create_shm_buffer(struct goot_shm_buffer *b, int32_t w, int32_t h) {
-    if (!g_shm || w <= 0 || h <= 0 || w > GOOT_MAX_DIM || h > GOOT_MAX_DIM) {
+static int create_shm_buffer(struct goosy_shm_buffer *b, int32_t w, int32_t h) {
+    if (!g_shm || w <= 0 || h <= 0 || w > GOOSY_MAX_DIM || h > GOOSY_MAX_DIM) {
         return -1;
     }
     int32_t stride = w * 4;
@@ -182,10 +182,10 @@ static int create_shm_buffer(struct goot_shm_buffer *b, int32_t w, int32_t h) {
     return 0;
 }
 
-struct goot_shm_buffer *goot_wl_acquire_buffer(void) {
+struct goosy_shm_buffer *goosy_wl_acquire_buffer(void) {
     int32_t pw = g_width * g_scale;
     int32_t ph = g_height * g_scale;
-    if (pw <= 0 || ph <= 0 || pw > GOOT_MAX_DIM || ph > GOOT_MAX_DIM) return NULL;
+    if (pw <= 0 || ph <= 0 || pw > GOOSY_MAX_DIM || ph > GOOSY_MAX_DIM) return NULL;
     for (int i = 0; i < 2; i++) {
         if (!g_bufs[i].busy) {
             if (g_bufs[i].width != pw || g_bufs[i].height != ph) {
@@ -203,7 +203,7 @@ static void frame_done(void *data, struct wl_callback *cb, uint32_t time_ms) {
     wl_callback_destroy(cb);
     if (g_frame_cb == cb) g_frame_cb = NULL;
     g_frame_ready = true;
-    push_ev3(GOOT_EV_FRAME_DONE, 0, 0, 0);
+    push_ev3(GOOSY_EV_FRAME_DONE, 0, 0, 0);
 }
 
 static void fract_preferred_scale(void *data, struct wp_fractional_scale_v1 *fs, uint32_t scale_120ths) {
@@ -214,7 +214,7 @@ static void fract_preferred_scale(void *data, struct wp_fractional_scale_v1 *fs,
         if (sc < 1) sc = 1;
         if (sc != g_scale) {
             g_scale = sc;
-            push_ev3(GOOT_EV_CONFIGURE, g_width, g_height, g_scale);
+            push_ev3(GOOSY_EV_CONFIGURE, g_width, g_height, g_scale);
         }
     }
 }
@@ -224,7 +224,7 @@ static const struct wp_fractional_scale_v1_listener g_fract_scale_listener = {
 
 static const struct wl_callback_listener g_frame_listener = { .done = frame_done };
 
-void goot_wl_commit_damage(struct goot_shm_buffer *buf,
+void goosy_wl_commit_damage(struct goosy_shm_buffer *buf,
                            int32_t x, int32_t y, int32_t w, int32_t h,
                            bool request_frame_cb) {
     if (!g_surface || !buf || !buf->wl_buffer) return;
@@ -260,15 +260,15 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
     (void)data;
     xdg_surface_ack_configure(xdg_surface, serial);
     g_configured = true;
-    push_ev3(GOOT_EV_CONFIGURE, g_width, g_height, g_scale);
+    push_ev3(GOOSY_EV_CONFIGURE, g_width, g_height, g_scale);
 }
 static const struct xdg_surface_listener g_xdg_surface_listener = { .configure = xdg_surface_configure };
 
 static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
                                    int32_t width, int32_t height, struct wl_array *states) {
     (void)data; (void)toplevel;
-    if (width > 0 && width <= GOOT_MAX_DIM)   g_width  = width;
-    if (height > 0 && height <= GOOT_MAX_DIM) g_height = height;
+    if (width > 0 && width <= GOOSY_MAX_DIM)   g_width  = width;
+    if (height > 0 && height <= GOOSY_MAX_DIM) g_height = height;
 
     g_is_maximized = false;
     g_is_fullscreen = false;
@@ -283,7 +283,7 @@ static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
     }
 }
 static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
-    (void)data; (void)toplevel; push_ev3(GOOT_EV_CLOSE, 0, 0, 0);
+    (void)data; (void)toplevel; push_ev3(GOOSY_EV_CLOSE, 0, 0, 0);
 }
 static const struct xdg_toplevel_listener g_xdg_toplevel_listener = {
     .configure = xdg_toplevel_configure,
@@ -295,18 +295,18 @@ static const struct xdg_toplevel_listener g_xdg_toplevel_listener = {
  * ------------------------------------------------------------------------- */
 static void kb_keymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd, uint32_t size) {
     (void)data; (void)kb;
-    if (format == WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) goot_xkb_set_keymap_fd(fd, size);
+    if (format == WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) goosy_xkb_set_keymap_fd(fd, size);
     else if (fd >= 0) close(fd);
 }
 static void kb_enter(void *data, struct wl_keyboard *kb, uint32_t serial,
                      struct wl_surface *sf, struct wl_array *keys) {
     (void)data; (void)kb; (void)sf; (void)keys;
     g_last_serial = serial;
-    push_ev3(GOOT_EV_FOCUS, 1, 0, 0);
+    push_ev3(GOOSY_EV_FOCUS, 1, 0, 0);
 }
 static void kb_leave(void *data, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *sf) {
     (void)data; (void)kb; (void)serial; (void)sf;
-    push_ev3(GOOT_EV_FOCUS, 0, 0, 0);
+    push_ev3(GOOSY_EV_FOCUS, 0, 0, 0);
 }
 static int32_t  g_repeat_rate  = 25;
 static int32_t  g_repeat_delay = 400;
@@ -321,20 +321,20 @@ static void kb_key(void *data, struct wl_keyboard *kb, uint32_t serial,
         g_repeat_key = key;
         int32_t interval = (g_repeat_rate > 0) ? (1000 / g_repeat_rate) : 40;
         if (interval < 5) interval = 5;
-        goot_poll_arm_repeat(g_repeat_delay, interval);
+        goosy_poll_arm_repeat(g_repeat_delay, interval);
     } else {
         if (g_repeat_key == key) {
-            goot_poll_disarm_repeat();
+            goosy_poll_disarm_repeat();
             g_repeat_key = 0;
         }
     }
     uint32_t sym = 0;
     int32_t mods = 0;
-    goot_ev_t ev;
+    goosy_ev_t ev;
     memset(&ev, 0, sizeof(ev));
-    if (goot_xkb_translate_key(key, pressed, &sym, &mods,
+    if (goosy_xkb_translate_key(key, pressed, &sym, &mods,
                                ev.utf8, (int32_t)sizeof(ev.utf8), &ev.utf8_len)) {
-        ev.type = GOOT_EV_KEY;
+        ev.type = GOOSY_EV_KEY;
         ev.a    = (int32_t)sym;
         ev.b    = mods;
         ev.c    = ev.utf8_len;
@@ -344,7 +344,7 @@ static void kb_key(void *data, struct wl_keyboard *kb, uint32_t serial,
 static void kb_modifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
                          uint32_t dep, uint32_t lat, uint32_t loc, uint32_t grp) {
     (void)data; (void)kb; (void)serial;
-    goot_xkb_update_mods(dep, lat, loc, grp);
+    goosy_xkb_update_mods(dep, lat, loc, grp);
 }
 static void kb_repeat_info(void *data, struct wl_keyboard *kb, int32_t rate, int32_t delay) {
     (void)data; (void)kb;
@@ -356,15 +356,15 @@ static const struct wl_keyboard_listener g_kb_listener = {
     .key = kb_key, .modifiers = kb_modifiers, .repeat_info = kb_repeat_info,
 };
 
-void goot_wl_handle_timer_repeat(void) {
+void goosy_wl_handle_timer_repeat(void) {
     if (g_repeat_key == 0) return;
     uint32_t sym = 0;
     int32_t mods = 0;
-    goot_ev_t ev;
+    goosy_ev_t ev;
     memset(&ev, 0, sizeof(ev));
-    if (goot_xkb_translate_key(g_repeat_key, true, &sym, &mods,
+    if (goosy_xkb_translate_key(g_repeat_key, true, &sym, &mods,
                                ev.utf8, (int32_t)sizeof(ev.utf8), &ev.utf8_len)) {
-        ev.type = GOOT_EV_KEY;
+        ev.type = GOOSY_EV_KEY;
         ev.a    = (int32_t)sym;
         ev.b    = mods;
         ev.c    = ev.utf8_len;
@@ -372,7 +372,7 @@ void goot_wl_handle_timer_repeat(void) {
     }
 }
 
-void goot_wl_set_cursor_shape(int32_t shape) {
+void goosy_wl_set_cursor_shape(int32_t shape) {
     if (!g_pointer || !g_shm || !g_display) return;
     if (g_cursor_shape == shape && g_cursor_surface) return;
     g_cursor_shape = shape;
@@ -436,27 +436,27 @@ static void ptr_enter(void *data, struct wl_pointer *p, uint32_t serial,
     (void)data; (void)p; (void)sf;
     g_last_serial = serial;
     g_cursor_shape = -1;
-    goot_wl_set_cursor_shape(1);
-    push_ev3(GOOT_EV_POINTER_MOTION, wl_fixed_to_int(sx), wl_fixed_to_int(sy), goot_xkb_current_mods());
+    goosy_wl_set_cursor_shape(1);
+    push_ev3(GOOSY_EV_POINTER_MOTION, wl_fixed_to_int(sx), wl_fixed_to_int(sy), goosy_xkb_current_mods());
 }
 static void ptr_leave(void *data, struct wl_pointer *p, uint32_t serial, struct wl_surface *sf) {
     (void)data; (void)p; (void)serial; (void)sf;
 }
 static void ptr_motion(void *data, struct wl_pointer *p, uint32_t time_ms, wl_fixed_t sx, wl_fixed_t sy) {
     (void)data; (void)p; (void)time_ms;
-    push_ev3(GOOT_EV_POINTER_MOTION, wl_fixed_to_int(sx), wl_fixed_to_int(sy), goot_xkb_current_mods());
+    push_ev3(GOOSY_EV_POINTER_MOTION, wl_fixed_to_int(sx), wl_fixed_to_int(sy), goosy_xkb_current_mods());
 }
 static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial,
                        uint32_t time_ms, uint32_t button, uint32_t state) {
     (void)data; (void)p; (void)time_ms;
     g_last_serial = serial;
-    push_ev3(GOOT_EV_POINTER_BUTTON, (int32_t)button,
-             state == WL_POINTER_BUTTON_STATE_PRESSED ? 1 : 0, goot_xkb_current_mods());
+    push_ev3(GOOSY_EV_POINTER_BUTTON, (int32_t)button,
+             state == WL_POINTER_BUTTON_STATE_PRESSED ? 1 : 0, goosy_xkb_current_mods());
 }
 static void ptr_axis(void *data, struct wl_pointer *p, uint32_t time_ms, uint32_t axis, wl_fixed_t value) {
     (void)data; (void)p; (void)time_ms;
     if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
-        push_ev3(GOOT_EV_POINTER_AXIS, wl_fixed_to_int(value), goot_xkb_current_mods(), 0);
+        push_ev3(GOOSY_EV_POINTER_AXIS, wl_fixed_to_int(value), goosy_xkb_current_mods(), 0);
     }
 }
 static void ptr_frame(void *data, struct wl_pointer *p) { (void)data; (void)p; }
@@ -483,17 +483,17 @@ static void touch_down(void *data, struct wl_touch *t, uint32_t serial, uint32_t
                        struct wl_surface *sf, int32_t id, wl_fixed_t x, wl_fixed_t y) {
     (void)data; (void)t; (void)time_ms; (void)sf;
     g_last_serial = serial;
-    push_ev3(GOOT_EV_TOUCH_DOWN, wl_fixed_to_int(x), wl_fixed_to_int(y), id);
+    push_ev3(GOOSY_EV_TOUCH_DOWN, wl_fixed_to_int(x), wl_fixed_to_int(y), id);
 }
 static void touch_up(void *data, struct wl_touch *t, uint32_t serial, uint32_t time_ms, int32_t id) {
     (void)data; (void)t; (void)time_ms;
     g_last_serial = serial;
-    push_ev3(GOOT_EV_TOUCH_UP, id, 0, 0);
+    push_ev3(GOOSY_EV_TOUCH_UP, id, 0, 0);
 }
 static void touch_motion(void *data, struct wl_touch *t, uint32_t time_ms, int32_t id,
                          wl_fixed_t x, wl_fixed_t y) {
     (void)data; (void)t; (void)time_ms;
-    push_ev3(GOOT_EV_TOUCH_MOTION, wl_fixed_to_int(x), wl_fixed_to_int(y), id);
+    push_ev3(GOOSY_EV_TOUCH_MOTION, wl_fixed_to_int(x), wl_fixed_to_int(y), id);
 }
 static void touch_frame(void *data, struct wl_touch *t) { (void)data; (void)t; }
 static void touch_cancel(void *data, struct wl_touch *t) { (void)data; (void)t; }
@@ -651,11 +651,11 @@ static const struct wl_registry_listener g_registry_listener = {
 /* -------------------------------------------------------------------------
  * Public Wayland FFI Functions for Goose
  * ------------------------------------------------------------------------- */
-int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
+int32_t goosy_wl_init(goosy_const_bytes_t title, goosy_const_bytes_t app_id,
                      int32_t init_width, int32_t init_height) {
-    if (init_width > 0 && init_width <= GOOT_MAX_DIM)   g_width  = init_width;
-    if (init_height > 0 && init_height <= GOOT_MAX_DIM) g_height = init_height;
-    if (goot_xkb_init() != 0) return -1;
+    if (init_width > 0 && init_width <= GOOSY_MAX_DIM)   g_width  = init_width;
+    if (init_height > 0 && init_height <= GOOSY_MAX_DIM) g_height = init_height;
+    if (goosy_xkb_init() != 0) return -1;
 
     g_display = wl_display_connect(NULL);
     if (!g_display) return -1;
@@ -665,7 +665,7 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
     wl_display_roundtrip(g_display);
 
     if (!g_compositor || !g_shm || !g_wm_base) {
-        goot_wl_close();
+        goosy_wl_close();
         return -1;
     }
 
@@ -681,11 +681,11 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
     g_toplevel = xdg_surface_get_toplevel(g_xdg_surf);
     xdg_toplevel_add_listener(g_toplevel, &g_xdg_toplevel_listener, NULL);
 
-    const char *custom_title = goot_cmdline_title();
+    const char *custom_title = goosy_cmdline_title();
     if (custom_title && custom_title[0] != '\0') {
         xdg_toplevel_set_title(g_toplevel, custom_title);
     } else {
-        goot_wl_set_title(title);
+        goosy_wl_set_title(title);
     }
     char aid[128] = "goosy";
     if (app_id.data && app_id.len > 0 && app_id.len < (int64_t)sizeof(aid)) {
@@ -722,10 +722,10 @@ int32_t goot_wl_init(goot_const_bytes_t title, goot_const_bytes_t app_id,
     return 0;
 }
 
-int32_t goot_wl_fd(void) { return g_display ? wl_display_get_fd(g_display) : -1; }
-int32_t goot_wl_dispatch_pending(void) { return g_display ? wl_display_dispatch_pending(g_display) : -1; }
+int32_t goosy_wl_fd(void) { return g_display ? wl_display_get_fd(g_display) : -1; }
+int32_t goosy_wl_dispatch_pending(void) { return g_display ? wl_display_dispatch_pending(g_display) : -1; }
 
-int32_t goot_wl_prepare_and_read(void) {
+int32_t goosy_wl_prepare_and_read(void) {
     if (!g_display) return -1;
     while (wl_display_prepare_read(g_display) != 0) {
         if (wl_display_dispatch_pending(g_display) < 0) return -1;
@@ -738,24 +738,24 @@ int32_t goot_wl_prepare_and_read(void) {
     return wl_display_dispatch_pending(g_display);
 }
 
-int32_t goot_wl_flush(void) {
+int32_t goosy_wl_flush(void) {
     if (!g_display) return -1;
     int r = wl_display_flush(g_display);
     return (r < 0 && errno != EAGAIN) ? -1 : 0;
 }
 
-int32_t goot_wl_poll_event(void) {
-    if (g_ev_head == g_ev_tail) return GOOT_EV_NONE;
+int32_t goosy_wl_poll_event(void) {
+    if (g_ev_head == g_ev_tail) return GOOSY_EV_NONE;
     g_ev_cur = g_ev_q[g_ev_head];
-    g_ev_head = (g_ev_head + 1U) % GOOT_EV_QUEUE_CAP;
+    g_ev_head = (g_ev_head + 1U) % GOOSY_EV_QUEUE_CAP;
     return g_ev_cur.type;
 }
 
-int32_t goot_wl_ev_a(void) { return g_ev_cur.a; }
-int32_t goot_wl_ev_b(void) { return g_ev_cur.b; }
-int32_t goot_wl_ev_c(void) { return g_ev_cur.c; }
+int32_t goosy_wl_ev_a(void) { return g_ev_cur.a; }
+int32_t goosy_wl_ev_b(void) { return g_ev_cur.b; }
+int32_t goosy_wl_ev_c(void) { return g_ev_cur.c; }
 
-int64_t goot_wl_ev_utf8(goot_bytes_t out_buf) {
+int64_t goosy_wl_ev_utf8(goosy_bytes_t out_buf) {
     if (!out_buf.data || out_buf.len <= 0 || g_ev_cur.utf8_len <= 0) return 0;
     int32_t n = g_ev_cur.utf8_len;
     if ((int64_t)n > out_buf.len) n = (int32_t)out_buf.len;
@@ -763,9 +763,9 @@ int64_t goot_wl_ev_utf8(goot_bytes_t out_buf) {
     return (int64_t)n;
 }
 
-void goot_wl_set_title(goot_const_bytes_t title) {
+void goosy_wl_set_title(goosy_const_bytes_t title) {
     if (!g_toplevel) return;
-    char buf[256] = "Goot";
+    char buf[256] = "Goosy";
     if (title.data && title.len > 0) {
         int64_t n = title.len < (int64_t)(sizeof(buf) - 1) ? title.len : (int64_t)(sizeof(buf) - 1);
         memcpy(buf, title.data, (size_t)n);
@@ -774,23 +774,23 @@ void goot_wl_set_title(goot_const_bytes_t title) {
     xdg_toplevel_set_title(g_toplevel, buf);
 }
 
-int32_t goot_wl_width(void)       { return g_width; }
-int32_t goot_wl_height(void)      { return g_height; }
-int32_t goot_wl_scale(void)       { return g_scale; }
-bool    goot_wl_frame_ready(void) { return g_frame_ready; }
+int32_t goosy_wl_width(void)       { return g_width; }
+int32_t goosy_wl_height(void)      { return g_height; }
+int32_t goosy_wl_scale(void)       { return g_scale; }
+bool    goosy_wl_frame_ready(void) { return g_frame_ready; }
 
-int32_t goot_wl_is_maximized(void)  { return g_is_maximized ? 1 : 0; }
-int32_t goot_wl_is_fullscreen(void) { return g_is_fullscreen ? 1 : 0; }
-int32_t goot_wl_is_activated(void)  { return g_is_activated ? 1 : 0; }
+int32_t goosy_wl_is_maximized(void)  { return g_is_maximized ? 1 : 0; }
+int32_t goosy_wl_is_fullscreen(void) { return g_is_fullscreen ? 1 : 0; }
+int32_t goosy_wl_is_activated(void)  { return g_is_activated ? 1 : 0; }
 
-int32_t goot_wl_is_csd(void) {
+int32_t goosy_wl_is_csd(void) {
     if (g_deco_pref == 3) return 0; /* none */
     if (g_is_fullscreen) return 0;  /* fullscreen has no decorations */
     if (g_deco_pref == 1 && g_negotiated_deco == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE) return 0;
     return 1;
 }
 
-void goot_wl_set_decoration_mode(int32_t pref) {
+void goosy_wl_set_decoration_mode(int32_t pref) {
     g_deco_pref = pref;
     if (g_toplevel_deco) {
         if (pref == 1) {
@@ -801,25 +801,25 @@ void goot_wl_set_decoration_mode(int32_t pref) {
     }
 }
 
-void goot_wl_toplevel_move(void) {
+void goosy_wl_toplevel_move(void) {
     if (g_toplevel && g_seat && g_last_serial > 0) {
         xdg_toplevel_move(g_toplevel, g_seat, g_last_serial);
     }
 }
 
-void goot_wl_toplevel_resize(int32_t edges) {
+void goosy_wl_toplevel_resize(int32_t edges) {
     if (g_toplevel && g_seat && g_last_serial > 0 && edges > 0) {
         xdg_toplevel_resize(g_toplevel, g_seat, g_last_serial, (uint32_t)edges);
     }
 }
 
-void goot_wl_toplevel_minimize(void) {
+void goosy_wl_toplevel_minimize(void) {
     if (g_toplevel) {
         xdg_toplevel_set_minimized(g_toplevel);
     }
 }
 
-void goot_wl_toplevel_toggle_maximize(void) {
+void goosy_wl_toplevel_toggle_maximize(void) {
     if (!g_toplevel) return;
     if (g_is_maximized) {
         xdg_toplevel_unset_maximized(g_toplevel);
@@ -828,9 +828,9 @@ void goot_wl_toplevel_toggle_maximize(void) {
     }
 }
 
-int32_t goot_wl_clipboard_set(goot_const_bytes_t text) {
+int32_t goosy_wl_clipboard_set(goosy_const_bytes_t text) {
     if (!g_ddm || !g_data_dev || !text.data || text.len <= 0) return -1;
-    int64_t n = text.len > GOOT_CLIP_MAX ? GOOT_CLIP_MAX : text.len;
+    int64_t n = text.len > GOOSY_CLIP_MAX ? GOOSY_CLIP_MAX : text.len;
     memcpy(g_clip_copy_buf, text.data, (size_t)n);
     g_clip_copy_len = n;
 
@@ -846,7 +846,7 @@ int32_t goot_wl_clipboard_set(goot_const_bytes_t text) {
     return 0;
 }
 
-int32_t goot_wl_clipboard_request(void) {
+int32_t goosy_wl_clipboard_request(void) {
     if (!g_clip_offer || !g_display) return -1;
     int fds[2];
     if (pipe2(fds, O_CLOEXEC) != 0) return -1;
@@ -855,20 +855,20 @@ int32_t goot_wl_clipboard_request(void) {
     wl_display_flush(g_display);
 
     g_clip_paste_len = 0;
-    while (g_clip_paste_len < GOOT_CLIP_MAX) {
+    while (g_clip_paste_len < GOOSY_CLIP_MAX) {
         ssize_t n = read(fds[0], g_clip_paste_buf + g_clip_paste_len,
-                         (size_t)(GOOT_CLIP_MAX - g_clip_paste_len));
+                         (size_t)(GOOSY_CLIP_MAX - g_clip_paste_len));
         if (n <= 0) break;
         g_clip_paste_len += (int64_t)n;
     }
     close(fds[0]);
     if (g_clip_paste_len > 0) {
-        push_ev3(GOOT_EV_CLIPBOARD_DATA, (int32_t)g_clip_paste_len, 0, 0);
+        push_ev3(GOOSY_EV_CLIPBOARD_DATA, (int32_t)g_clip_paste_len, 0, 0);
     }
     return (int32_t)g_clip_paste_len;
 }
 
-int64_t goot_wl_clipboard_read(goot_bytes_t out_buf) {
+int64_t goosy_wl_clipboard_read(goosy_bytes_t out_buf) {
     if (!out_buf.data || out_buf.len <= 0 || g_clip_paste_len <= 0) return 0;
     int64_t n = g_clip_paste_len < out_buf.len ? g_clip_paste_len : out_buf.len;
     memcpy(out_buf.data, g_clip_paste_buf, (size_t)n);
@@ -876,9 +876,9 @@ int64_t goot_wl_clipboard_read(goot_bytes_t out_buf) {
     return n;
 }
 
-int32_t goot_wl_primary_set(goot_const_bytes_t text) {
+int32_t goosy_wl_primary_set(goosy_const_bytes_t text) {
     if (!text.data || text.len <= 0) return -1;
-    int64_t n = text.len > GOOT_CLIP_MAX ? GOOT_CLIP_MAX : text.len;
+    int64_t n = text.len > GOOSY_CLIP_MAX ? GOOSY_CLIP_MAX : text.len;
     memcpy(g_primary_buf, text.data, (size_t)n);
     g_primary_len = n;
 
@@ -900,7 +900,7 @@ int32_t goot_wl_primary_set(goot_const_bytes_t text) {
     return 0;
 }
 
-int32_t goot_wl_primary_request(void) {
+int32_t goosy_wl_primary_request(void) {
     if (g_prim_offer && g_display) {
         int fds[2];
         if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) == 0) {
@@ -909,8 +909,8 @@ int32_t goot_wl_primary_request(void) {
             wl_display_flush(g_display);
 
             g_primary_len = 0;
-            for (int retry = 0; retry < 5 && g_primary_len < GOOT_CLIP_MAX; retry++) {
-                ssize_t n = read(fds[0], g_primary_buf + g_primary_len, (size_t)(GOOT_CLIP_MAX - g_primary_len));
+            for (int retry = 0; retry < 5 && g_primary_len < GOOSY_CLIP_MAX; retry++) {
+                ssize_t n = read(fds[0], g_primary_buf + g_primary_len, (size_t)(GOOSY_CLIP_MAX - g_primary_len));
                 if (n > 0) {
                     g_primary_len += (int64_t)n;
                 } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -922,26 +922,26 @@ int32_t goot_wl_primary_request(void) {
             }
             close(fds[0]);
             if (g_primary_len > 0) {
-                push_ev3(GOOT_EV_PRIMARY_DATA, (int32_t)g_primary_len, 0, 0);
+                push_ev3(GOOSY_EV_PRIMARY_DATA, (int32_t)g_primary_len, 0, 0);
                 return (int32_t)g_primary_len;
             }
         }
     }
     if (g_primary_len > 0) {
-        push_ev3(GOOT_EV_PRIMARY_DATA, (int32_t)g_primary_len, 0, 0);
+        push_ev3(GOOSY_EV_PRIMARY_DATA, (int32_t)g_primary_len, 0, 0);
         return (int32_t)g_primary_len;
     }
     return 0;
 }
 
-int64_t goot_wl_primary_read(goot_bytes_t out_buf) {
+int64_t goosy_wl_primary_read(goosy_bytes_t out_buf) {
     if (!out_buf.data || out_buf.len <= 0 || g_primary_len <= 0) return 0;
     int64_t n = g_primary_len < out_buf.len ? g_primary_len : out_buf.len;
     memcpy(out_buf.data, g_primary_buf, (size_t)n);
     return n;
 }
 
-void goot_wl_close(void) {
+void goosy_wl_close(void) {
     destroy_shm_buffer(&g_bufs[0]);
     destroy_shm_buffer(&g_bufs[1]);
     if (g_cursor_surface) { wl_surface_destroy(g_cursor_surface); g_cursor_surface = NULL; }
@@ -973,5 +973,5 @@ void goot_wl_close(void) {
     if (g_compositor) { wl_compositor_destroy(g_compositor); g_compositor = NULL; }
     if (g_registry)   { wl_registry_destroy(g_registry); g_registry = NULL; }
     if (g_display)    { wl_display_disconnect(g_display); g_display = NULL; }
-    goot_xkb_close();
+    goosy_xkb_close();
 }

@@ -1,4 +1,4 @@
-// Goot — Streaming UTF-8 Decoder, Combining Mark & Wide-Character Cell Width
+// Goosy — Streaming UTF-8 Decoder, Combining Mark & Wide-Character Cell Width
 // Pure Goose implementation with strict rejection of overlong encodings,
 // UTF-16 surrogates (U+D800..U+DFFF), and out-of-range (> U+10FFFF) sequences.
 
