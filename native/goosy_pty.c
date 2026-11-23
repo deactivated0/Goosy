@@ -1120,6 +1120,7 @@ int64_t goosy_stream_fast(goosy_cells_slice_t cells, int32_t cols, int32_t rows,
     uint32_t def_fg = (uint32_t)state.data[14];
     uint32_t def_bg = (uint32_t)state.data[15];
     uint32_t link_id = (uint32_t)state.data[16];
+    uint32_t last_char = (state.len >= 18) ? (uint32_t)state.data[17] : 0x20;
 
     goosy_cell_t tmpl;
     memset(&tmpl, 0, sizeof(tmpl));
@@ -1225,6 +1226,7 @@ int64_t goosy_stream_fast(goosy_cells_slice_t cells, int32_t cols, int32_t rows,
                     if (cx + 1 < cols) cur_row_cells[cx + 1] = blank;
                 }
                 tmpl.cp = (uint32_t)ch;
+                last_char = (uint32_t)ch;
                 cur_row_cells[cx++] = tmpl;
                 i++;
             }
@@ -1344,6 +1346,9 @@ int64_t goosy_stream_fast(goosy_cells_slice_t cells, int32_t cols, int32_t rows,
     state.data[11] = (int32_t)tmpl.attrs;
     state.data[12] = (int32_t)tmpl.ul_style;
     state.data[13] = (int32_t)tmpl.ul_color;
+    if (state.len >= 18) {
+        state.data[17] = (int32_t)last_char;
+    }
 
     return i - pos;
 }

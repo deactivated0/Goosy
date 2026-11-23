@@ -208,6 +208,43 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
     let is_live = (s.view_offset == 0 || s.alt_screen);
     let sel_active = s.sel_active;
 
+    // PASS 1: Fill cell backgrounds for all dirty rows in batched horizontal runs
+    for row in 0..s.rows {
+        let row_dirty = is_full || (row < s.dirty_rows.len && s.dirty_rows[row] > 0) ||
+                        (m.kind != modes::MODE_NORMAL && row == s.rows - 1);
+        if !row_dirty { continue; }
+
+        let py = title_h + pad_px + row * cell_h;
+        let phys_r = if is_live { screen::phys_row(s, row) } else { 0 };
+        let row_base = (phys_r as i64) * s.cols;
+
+        var col: i32 = 0;
+        while col < s.cols {
+            let cell = if is_live { s.cells[row_base + col] } else { screen::visible_cell(s, col, row) };
+            var bg = cell.bg;
+            if (cell.attrs & screen::ATTR_INVERSE) != 0 { bg = cell.fg; }
+            if (cell.attrs & screen::ATTR_HIDDEN) != 0  { bg = cell.bg; }
+            if sel_active && screen::is_selected(s, col, row) { bg = cfg.palette.selection_bg; }
+
+            let start_col = col;
+            col += 1;
+            while col < s.cols {
+                let next_cell = if is_live { s.cells[row_base + col] } else { screen::visible_cell(s, col, row) };
+                var next_bg = next_cell.bg;
+                if (next_cell.attrs & screen::ATTR_INVERSE) != 0 { next_bg = next_cell.fg; }
+                if (next_cell.attrs & screen::ATTR_HIDDEN) != 0  { next_bg = next_cell.bg; }
+                if sel_active && screen::is_selected(s, col, row) { next_bg = cfg.palette.selection_bg; }
+                if next_bg != bg { break; }
+                col += 1;
+            }
+
+            let bx = pad_px + start_col * cell_w;
+            let bw = (col - start_col) * cell_w;
+            ffi::render_fill_rect(bx, py, bw, cell_h, bg);
+        }
+    }
+
+    // PASS 2: Render glyphs, procedural shapes, and underlines on top of clean backgrounds
     for row in 0..s.rows {
         let row_dirty = is_full || (row < s.dirty_rows.len && s.dirty_rows[row] > 0) ||
                         (m.kind != modes::MODE_NORMAL && row == s.rows - 1);
@@ -232,7 +269,7 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
 
             let px = pad_px + col * cell_w;
             let span: i32 = if cell.width == 2 { 2 } else { 1 };
-            ffi::render_cell_ext(px, py, cell_w, cell_h, cell.cp, cell.combining, fg, bg, cell.attrs, span, cell.ul_style, cell.ul_color);
+            ffi::render_cell_ext(px, py, cell_w, cell_h, cell.cp, cell.combining, fg, 0xFFFFFFFF, cell.attrs, span, cell.ul_style, cell.ul_color);
         }
     }
 

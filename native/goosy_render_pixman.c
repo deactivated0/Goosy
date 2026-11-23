@@ -334,7 +334,9 @@ static void pixman_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell
     int32_t total_w = cell_w * span_cols;
 
     /* 1. Fill cell background */
-    pixman_fill_rect(px, py, total_w, cell_h, bg_rgb);
+    if (bg_rgb != 0xFFFFFFFFU) {
+        pixman_fill_rect(px, py, total_w, cell_h, bg_rgb);
+    }
 
     /* 2. Procedural rendering for Box-Drawing and Block Elements */
     if (render_procedural_glyph(px, py, total_w, cell_h, codepoint, fg_rgb, bg_rgb)) {

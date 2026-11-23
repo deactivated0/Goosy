@@ -40,6 +40,7 @@ root struct Parser {
     dcs_buf: u8[>..] = [],
     apc_buf: u8[>..] = [],
     allow_osc52: bool = false,
+    last_char: u32 = 0x20,
 }
 
 fn init(p: Parser&, allow_osc52: bool) {
@@ -56,6 +57,7 @@ fn init(p: Parser&, allow_osc52: bool) {
     p.dcs_buf.clear();
     p.apc_buf.clear();
     p.allow_osc52 = allow_osc52;
+    p.last_char = 0x20;
     for i in 0..MAX_PARAMS { p.params[i] = 0; p.is_subparam[i] = false; }
 }
 
@@ -298,13 +300,23 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
 
     match final_b {
         'A' => { screen::set_cursor(s, s.cx, s.cy - param_or(p, 0, 1)); },
-        'B' => { screen::set_cursor(s, s.cx, s.cy + param_or(p, 0, 1)); },
-        'C' => { screen::set_cursor(s, s.cx + param_or(p, 0, 1), s.cy); },
+        'B', 'e' => { screen::set_cursor(s, s.cx, s.cy + param_or(p, 0, 1)); },
+        'C', 'a' => { screen::set_cursor(s, s.cx + param_or(p, 0, 1), s.cy); },
         'D' => { screen::set_cursor(s, s.cx - param_or(p, 0, 1), s.cy); },
         'E' => { screen::set_cursor(s, 0, s.cy + param_or(p, 0, 1)); },
         'F' => { screen::set_cursor(s, 0, s.cy - param_or(p, 0, 1)); },
         'G', '`' => { screen::set_cursor(s, param_or(p, 0, 1) - 1, s.cy); },
-        'd' => { screen::set_cursor(s, s.cx, param_or(p, 0, 1) - 1); },
+        'd' => {
+            let row = param_or(p, 0, 1) - 1;
+            let y = if s.origin_mode { s.scroll_top + row } else { row };
+            screen::set_cursor(s, s.cx, y);
+        },
+        'b' => {
+            let rep_count = param_or(p, 0, 1);
+            if p.last_char >= 0x20 {
+                for _ in 0..rep_count { screen::put_codepoint(s, p.last_char); }
+            }
+        },
         'H', 'f' => {
             let row = param_or(p, 0, 1) - 1;
             let col = param_or(p, 1, 1) - 1;
@@ -507,7 +519,12 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
         if b < 0x20 { handle_c0(s, b); return; }
         if b == 0x7F { return; }
         let cp, ready = utf8::feed(p.utf8_dec, b);
-        if ready { screen::put_codepoint(s, cp); }
+        if ready {
+            if utf8::cell_width(cp) > 0 {
+                p.last_char = cp;
+            }
+            screen::put_codepoint(s, cp);
+        }
         return;
     }
 
@@ -686,7 +703,7 @@ fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const
                 while s.sb_wrapped_rows.len < s.sb_cap_lines { s.sb_wrapped_rows.push(0); }
             }
 
-            var stream_state: i32[17] = [
+            var stream_state: i32[18] = [
                 s.cx,
                 s.cy,
                 s.grid_offset,
@@ -704,6 +721,7 @@ fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const
                 pal.fg as i32,
                 pal.bg as i32,
                 s.cur_link_id as i32,
+                p.last_char as i32,
             ];
             let consumed = stream_fast(s.cells[..], s.cols, s.rows,
                                        stream_state[..],
@@ -724,6 +742,7 @@ fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const
                 s.cur_attrs = stream_state[11] as u16;
                 s.cur_ul_style = stream_state[12] as u8;
                 s.cur_ul_color = stream_state[13] as u32;
+                p.last_char = stream_state[17] as u32;
                 s.full_redraw_frames = 2;
                 i += consumed;
                 continue;

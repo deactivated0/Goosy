@@ -345,6 +345,27 @@ fn test_rendering_glitches_and_unicode_width() {
     assert(scr.cy == 4); // Line 1 in origin mode maps to row 4 (0-based)
     screen::clamp_cursor(scr);
     assert(scr.cy == 4);
+
+    // 5. ECMA-48 Repeat character (REP: CSI b)
+    parser::feed_slice(par, scr, pal, "\x1b[?6l\x1b[1;24r\x1b[2;1HZ\x1b[4b");
+    for col in 0..5 {
+        let cz = screen::visible_cell(scr, col as i32, 1);
+        assert(cz.cp == 'Z');
+    }
+    assert(scr.cx == 5);
+
+    // 6. ECMA-48 HPR (CSI a) and VPR (CSI e)
+    parser::feed_slice(par, scr, pal, "\x1b[1;1H\x1b[3a");
+    assert(scr.cx == 3 && scr.cy == 0);
+    parser::feed_slice(par, scr, pal, "\x1b[2e");
+    assert(scr.cx == 3 && scr.cy == 2);
+
+    // 7. ECMA-48 VPA (CSI d) respecting origin mode
+    parser::feed_slice(par, scr, pal, "\x1b[?6l\x1b[10d");
+    assert(scr.cy == 9);
+    parser::feed_slice(par, scr, pal, "\x1b[5;15r\x1b[?6h\x1b[3d");
+    assert(scr.cy == 6);
+    parser::feed_slice(par, scr, pal, "\x1b[?6l\x1b[1;24r");
 }
 
 fn test_crlf_paste_and_resize_preservation() {

@@ -712,8 +712,23 @@ static vk_atlas_slot_t *vk_get_or_upload_glyph(uint32_t cp, uint8_t style) {
     int32_t gy = g_atlas_cur_y;
 
     if (g_vk_staging_ptr) {
-        for (int32_t r = 0; r < g->height; r++) {
-            memcpy(g_vk_staging_ptr + (size_t)r * (size_t)g->width, g->bitmap + (size_t)r * (size_t)g->stride, (size_t)g->width);
+        if (g->is_color) {
+            for (int32_t r = 0; r < g->height; r++) {
+                const uint8_t *src_row = g->bitmap + (size_t)r * (size_t)g->stride;
+                uint8_t *dst_row = g_vk_staging_ptr + (size_t)r * (size_t)g->width;
+                for (int32_t c = 0; c < g->width; c++) {
+                    uint8_t b = src_row[c * 4 + 0];
+                    uint8_t gr = src_row[c * 4 + 1];
+                    uint8_t re = src_row[c * 4 + 2];
+                    uint8_t a = src_row[c * 4 + 3];
+                    uint8_t lum = (uint8_t)((b * 29 + gr * 150 + re * 77 + 128) >> 8);
+                    dst_row[c] = (a > 0) ? (lum > 30 ? lum : a) : 0;
+                }
+            }
+        } else {
+            for (int32_t r = 0; r < g->height; r++) {
+                memcpy(g_vk_staging_ptr + (size_t)r * (size_t)g->width, g->bitmap + (size_t)r * (size_t)g->stride, (size_t)g->width);
+            }
         }
 
         /* One-time copy command to atlas image */
@@ -950,7 +965,9 @@ static void vk_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
     int32_t total_w = cell_w * span_cols;
 
     /* 1. Background */
-    vk_fill_rect(px, py, total_w, cell_h, bg_rgb);
+    if (bg_rgb != 0xFFFFFFFFU) {
+        vk_fill_rect(px, py, total_w, cell_h, bg_rgb);
+    }
 
     /* 2. Procedural Box-Drawing & Block Elements */
     if (vk_render_procedural_glyph(px, py, total_w, cell_h, codepoint, fg_rgb, bg_rgb)) {

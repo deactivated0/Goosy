@@ -285,7 +285,27 @@ static gl_atlas_slot_t *gl_get_or_upload_glyph(uint32_t cp, uint8_t style) {
     int32_t gy = g_atlas_cur_y;
     glBindTexture(GL_TEXTURE_2D, g_atlas);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, gx, gy, g->width, g->height, GL_ALPHA, GL_UNSIGNED_BYTE, g->bitmap);
+    if (g->is_color) {
+        uint8_t *alpha_buf = (uint8_t *)malloc((size_t)g->width * (size_t)g->height);
+        if (alpha_buf) {
+            for (int32_t r = 0; r < g->height; r++) {
+                const uint8_t *src_row = g->bitmap + (size_t)r * (size_t)g->stride;
+                uint8_t *dst_row = alpha_buf + (size_t)r * (size_t)g->width;
+                for (int32_t c = 0; c < g->width; c++) {
+                    uint8_t b = src_row[c * 4 + 0];
+                    uint8_t gr = src_row[c * 4 + 1];
+                    uint8_t re = src_row[c * 4 + 2];
+                    uint8_t a = src_row[c * 4 + 3];
+                    uint8_t lum = (uint8_t)((b * 29 + gr * 150 + re * 77 + 128) >> 8);
+                    dst_row[c] = (a > 0) ? (lum > 30 ? lum : a) : 0;
+                }
+            }
+            glTexSubImage2D(GL_TEXTURE_2D, 0, gx, gy, g->width, g->height, GL_ALPHA, GL_UNSIGNED_BYTE, alpha_buf);
+            free(alpha_buf);
+        }
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, gx, gy, g->width, g->height, GL_ALPHA, GL_UNSIGNED_BYTE, g->bitmap);
+    }
 
     gl_atlas_slot_t *slot = &g_atlas_slots[g_atlas_slot_count++];
     slot->used = 1;
@@ -466,7 +486,9 @@ static void gl_cell_ext(int32_t px, int32_t py, int32_t cell_w, int32_t cell_h,
     int32_t total_w = cell_w * span_cols;
 
     /* 1. Cell background */
-    gl_fill_rect(px, py, total_w, cell_h, bg_rgb);
+    if (bg_rgb != 0xFFFFFFFFU) {
+        gl_fill_rect(px, py, total_w, cell_h, bg_rgb);
+    }
 
     /* 2. Procedural Box-Drawing & Block Elements */
     if (gl_render_procedural_glyph(px, py, total_w, cell_h, codepoint, fg_rgb, bg_rgb)) {

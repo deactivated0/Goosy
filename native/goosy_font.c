@@ -44,6 +44,123 @@ static int32_t       g_baseline    = 12;
 static FT_Face g_fallback_faces[MAX_FALLBACK_FACES];
 static int32_t g_fallback_count = 0;
 
+static inline bool is_wide_char(uint32_t cp) {
+    if (cp < 0x1100) return false;
+    if ((cp >= 0x1100 && cp <= 0x115F) ||
+        cp == 0x231A || cp == 0x231B ||
+        (cp >= 0x23E9 && cp <= 0x23EC) ||
+        cp == 0x23F0 || cp == 0x23F3 ||
+        cp == 0x2329 || cp == 0x232A ||
+        (cp >= 0x25FD && cp <= 0x25FE) ||
+        (cp >= 0x2614 && cp <= 0x2615) ||
+        (cp >= 0x2648 && cp <= 0x2653) ||
+        cp == 0x267F || cp == 0x2693 || cp == 0x26A1 ||
+        (cp >= 0x26AA && cp <= 0x26AB) ||
+        (cp >= 0x26BD && cp <= 0x26BE) ||
+        (cp >= 0x26C4 && cp <= 0x26C5) ||
+        cp == 0x26CE || cp == 0x26D4 || cp == 0x26EA ||
+        (cp >= 0x26F2 && cp <= 0x26F3) ||
+        cp == 0x26F5 || cp == 0x26FA || cp == 0x26FD ||
+        cp == 0x2702 || cp == 0x2705 ||
+        (cp >= 0x2708 && cp <= 0x270D) ||
+        cp == 0x270F || cp == 0x2712 || cp == 0x2714 || cp == 0x2716 ||
+        cp == 0x271D || cp == 0x2721 || cp == 0x2728 ||
+        (cp >= 0x2733 && cp <= 0x2734) ||
+        cp == 0x2744 || cp == 0x2747 || cp == 0x274C || cp == 0x274E ||
+        (cp >= 0x2753 && cp <= 0x2755) ||
+        cp == 0x2757 || (cp >= 0x2763 && cp <= 0x2764) ||
+        (cp >= 0x2795 && cp <= 0x2797) ||
+        cp == 0x27A1 || cp == 0x27B0 || cp == 0x27BF ||
+        (cp >= 0x2934 && cp <= 0x2935) ||
+        (cp >= 0x2B05 && cp <= 0x2B07) ||
+        (cp >= 0x2B1B && cp <= 0x2B1C) ||
+        cp == 0x2B50 || cp == 0x2B55 ||
+        (cp >= 0x2E80 && cp <= 0x303E) ||
+        (cp >= 0x3040 && cp <= 0xA4CF) ||
+        (cp >= 0xAC00 && cp <= 0xD7A3) ||
+        (cp >= 0xF900 && cp <= 0xFAFF) ||
+        (cp >= 0xFE10 && cp <= 0xFE19) ||
+        (cp >= 0xFE30 && cp <= 0xFE6F) ||
+        (cp >= 0xFF00 && cp <= 0xFF60) ||
+        (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+        (cp >= 0x1F000 && cp <= 0x1FAFF) ||
+        (cp >= 0x20000 && cp <= 0x3FFFD)) {
+        return true;
+    }
+    return false;
+}
+
+static void scale_and_clamp_glyph(goosy_glyph_t *g, uint32_t cp) {
+    if (!g || !g->bitmap || g->width <= 0 || g->height <= 0) return;
+
+    int32_t max_w = is_wide_char(cp) ? (g_cell_w * 2) : g_cell_w;
+    int32_t max_h = g_cell_h;
+
+    // 1. If glyph exceeds the cell bounding box, downscale it smoothly
+    if (g->width > max_w || g->height > max_h) {
+        double sx = (double)g->width / (double)max_w;
+        double sy = (double)g->height / (double)max_h;
+        double scale = (sx > sy) ? sx : sy;
+        int32_t nw = (int32_t)(g->width / scale);
+        int32_t nh = (int32_t)(g->height / scale);
+        if (nw < 1) nw = 1;
+        if (nh < 1) nh = 1;
+        if (nw > max_w) nw = max_w;
+        if (nh > max_h) nh = max_h;
+
+        size_t bpp = g->is_color ? 4U : 1U;
+        size_t new_stride = ((size_t)nw * bpp + 3U) & ~3U;
+        uint8_t *new_bm = (uint8_t *)calloc(1, new_stride * (size_t)nh);
+        if (new_bm) {
+            for (int32_t dy = 0; dy < nh; dy++) {
+                int32_t sy0 = (int32_t)(dy * scale);
+                if (sy0 >= g->height) sy0 = g->height - 1;
+                const uint8_t *src_row = g->bitmap + (size_t)sy0 * (size_t)g->stride;
+                uint8_t *dst_row = new_bm + (size_t)dy * new_stride;
+                for (int32_t dx = 0; dx < nw; dx++) {
+                    int32_t sx0 = (int32_t)(dx * scale);
+                    if (sx0 >= g->width) sx0 = g->width - 1;
+                    if (bpp == 4) {
+                        dst_row[dx * 4 + 0] = src_row[sx0 * 4 + 0];
+                        dst_row[dx * 4 + 1] = src_row[sx0 * 4 + 1];
+                        dst_row[dx * 4 + 2] = src_row[sx0 * 4 + 2];
+                        dst_row[dx * 4 + 3] = src_row[sx0 * 4 + 3];
+                    } else {
+                        dst_row[dx] = src_row[sx0];
+                    }
+                }
+            }
+            free(g->bitmap);
+            g->bitmap = new_bm;
+            g->width = nw;
+            g->height = nh;
+            g->stride = (int32_t)new_stride;
+            g->bearing_x = (max_w - nw) / 2;
+            g->bearing_y = g_baseline - (max_h - nh) / 2;
+            return;
+        }
+    }
+
+    // 2. Clamp bearing_y so top of glyph never bleeds into row above
+    if (g->bearing_y > g_baseline) {
+        g->bearing_y = g_baseline;
+    }
+    // 3. Clamp bottom so glyph never bleeds into row below
+    if (g->height - g->bearing_y > max_h - g_baseline) {
+        g->bearing_y = g->height - (max_h - g_baseline);
+        if (g->bearing_y > g_baseline) g->bearing_y = g_baseline;
+    }
+
+    // 4. Clamp horizontal bearings so glyph stays strictly within [0, max_w]
+    if (g->bearing_x < 0) {
+        g->bearing_x = 0;
+    }
+    if (g->bearing_x + g->width > max_w) {
+        g->bearing_x = max_w - g->width;
+        if (g->bearing_x < 0) g->bearing_x = 0;
+    }
+}
+
 static FT_Face find_fallback_face(uint32_t codepoint) {
     for (int32_t i = 0; i < g_fallback_count; i++) {
         if (g_fallback_faces[i] && FT_Get_Char_Index(g_fallback_faces[i], codepoint) != 0) {
@@ -75,7 +192,16 @@ static FT_Face find_fallback_face(uint32_t codepoint) {
     if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
         if (FT_New_Face(g_ft, (const char *)file, 0, &face) == 0) {
             if (FT_HAS_FIXED_SIZES(face) && face->num_fixed_sizes > 0) {
-                FT_Select_Size(face, 0);
+                int best_idx = 0;
+                int best_diff = 999999;
+                for (int s = 0; s < face->num_fixed_sizes; s++) {
+                    int diff = abs(face->available_sizes[s].height - g_cell_h);
+                    if (diff < best_diff) {
+                        best_diff = diff;
+                        best_idx = s;
+                    }
+                }
+                FT_Select_Size(face, best_idx);
             } else {
                 FT_Set_Char_Size(face, 0, (FT_F26Dot6)g_size_pt * 64, (FT_UInt)g_dpi, (FT_UInt)g_dpi);
             }
@@ -118,7 +244,16 @@ static FT_Face load_fc_face(const char *family, int weight, int slant, int size_
     if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
         if (FT_New_Face(g_ft, (const char *)file, 0, &face) == 0) {
             if (FT_HAS_FIXED_SIZES(face) && face->num_fixed_sizes > 0) {
-                FT_Select_Size(face, 0);
+                int best_idx = 0;
+                int best_diff = 999999;
+                for (int s = 0; s < face->num_fixed_sizes; s++) {
+                    int diff = abs(face->available_sizes[s].height - g_cell_h);
+                    if (diff < best_diff) {
+                        best_diff = diff;
+                        best_idx = s;
+                    }
+                }
+                FT_Select_Size(face, best_idx);
             } else {
                 FT_Set_Char_Size(face, 0, (FT_F26Dot6)size_pt * 64, (FT_UInt)dpi, (FT_UInt)dpi);
             }
@@ -136,9 +271,11 @@ static void update_metrics(void) {
     int32_t desc = (int32_t)(-g_face_reg->size->metrics.descender >> 6);
     int32_t h = (int32_t)(g_face_reg->size->metrics.height >> 6);
     if (h < asc + desc) h = asc + desc;
-    g_cell_w   = adv > 0 ? adv : 8;
-    g_cell_h   = (h > 0 ? h : 16) + g_line_space;
-    g_baseline = asc > 0 ? asc : (g_cell_h - 3);
+    g_cell_w = adv > 0 ? adv : 8;
+    g_cell_h = h + g_line_space;
+    int32_t extra = g_cell_h - (asc + desc);
+    int32_t top_pad = extra > 0 ? (extra / 2) : 0;
+    g_baseline = asc + top_pad;
 }
 
 int32_t goosy_font_init(goosy_const_bytes_t family, int32_t size_pt, int32_t dpi, int32_t line_spacing_px) {
@@ -303,6 +440,7 @@ const goosy_glyph_t *goosy_font_get_glyph(uint32_t codepoint, uint8_t style_flag
                 memcpy(g->bitmap + (size_t)row * rowstride, src, (size_t)g->width * bpp);
             }
         }
+        scale_and_clamp_glyph(g, codepoint);
     }
     if (codepoint < 128) {
         g_ascii_cache[codepoint][style] = g;
