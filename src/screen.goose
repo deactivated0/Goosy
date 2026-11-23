@@ -137,6 +137,18 @@ fn get_hyperlink(s: Screen&, id: u32, out: u8[>..]&) -> bool {
     return true;
 }
 
+extern fn cells_scroll_up(cells: Cell[:], cols: i32, top: i32, bottom: i32, count: i32) = "goosy_cells_scroll_up";
+extern fn cells_scroll_down(cells: Cell[:], cols: i32, top: i32, bottom: i32, count: i32) = "goosy_cells_scroll_down";
+extern fn screen_scroll_up(cells: Cell[:], cols: i32, top: i32, bottom: i32, count: i32,
+                           prompt_rows: u8[:], wrapped_rows: u8[:], dirty_rows: u8[:],
+                           fg: u32, bg: u32) = "goosy_screen_scroll_up";
+extern fn screen_push_scrollback(sb_cells: Cell[:], sb_cols: i32, dst_line: i32,
+                                 cells: Cell[:], cols: i32, row: i32,
+                                 sb_prompt: u8[:], sb_wrapped: u8[:],
+                                 prompt_rows: const u8[:], wrapped_rows: const u8[:]) = "goosy_push_scrollback";
+extern fn cells_copy(dst: Cell[:], dst_offset: i64, src: Cell[:], src_offset: i64, count: i64) = "goosy_cells_copy";
+extern fn cells_fill(cells: Cell[:], start_idx: i64, count: i64, fg: u32, bg: u32) = "goosy_cells_fill";
+
 fn blank_cell(s: Screen&) -> Cell {
     return Cell {
         cp: 0x20, combining: 0, fg: s.default_fg, bg: s.default_bg,
@@ -235,11 +247,8 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     s.sb_cells.clear();
     s.sb_prompt_rows.clear();
     s.sb_wrapped_rows.clear();
-    if cap > 0 {
-        let sb_total = (cap as i64) * c;
-        for _ in 0..sb_total { s.sb_cells.push(b); }
-        for _ in 0..cap { s.sb_prompt_rows.push(0); s.sb_wrapped_rows.push(0); }
-    }
+    // On-demand allocation: avoid allocating up to 100,000 blank rows at startup.
+    // Rows are grown dynamically in push_scrollback_row, saving ~20 MB idle RSS and cutting startup time.
     s.full_redraw_frames = 2;
 }
 
@@ -276,30 +285,26 @@ fn push_scrollback_row(s: Screen&, row: i32) {
         s.sb_count += 1;
     }
 
-    if dst_line < s.sb_prompt_rows.len && row < s.prompt_rows.len {
-        s.sb_prompt_rows[dst_line] = s.prompt_rows[row];
-    }
-    if dst_line < s.sb_wrapped_rows.len && row < s.wrapped_rows.len {
-        s.sb_wrapped_rows[dst_line] = s.wrapped_rows[row];
+    let dst_base = (dst_line as i64) * s.sb_cols;
+    let b = blank_cell(s);
+    let target = dst_base + s.sb_cols;
+    if s.sb_cells.len < target {
+        var new_cap = s.sb_cells.len + (512 as i64) * s.sb_cols;
+        let max_cap = (s.sb_cap_lines as i64) * s.sb_cols;
+        if new_cap > max_cap { new_cap = max_cap; }
+        if new_cap < target { new_cap = target; }
+        while s.sb_cells.len < new_cap {
+            s.sb_cells.push(b);
+        }
     }
 
-    let src_base = (row as i64) * s.cols;
-    let dst_base = (dst_line as i64) * s.sb_cols;
-    if s.cols == s.sb_cols {
-        for c in 0..s.cols {
-            s.sb_cells[dst_base + c] = s.cells[src_base + c];
-        }
-    } else {
-        let copy_cols = if s.cols < s.sb_cols { s.cols } else { s.sb_cols };
-        let b = blank_cell(s);
-        for c in 0..s.sb_cols {
-            if c < copy_cols {
-                s.sb_cells[dst_base + c] = s.cells[src_base + c];
-            } else {
-                s.sb_cells[dst_base + c] = b;
-            }
-        }
-    }
+    while s.sb_prompt_rows.len <= dst_line { s.sb_prompt_rows.push(0); }
+    while s.sb_wrapped_rows.len <= dst_line { s.sb_wrapped_rows.push(0); }
+
+    screen_push_scrollback(s.sb_cells[..], s.sb_cols, dst_line,
+                           s.cells[..], s.cols, row,
+                           s.sb_prompt_rows[..], s.sb_wrapped_rows[..],
+                           s.prompt_rows[..], s.wrapped_rows[..]);
 }
 
 fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
@@ -310,37 +315,10 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
         for i in 0..count { push_scrollback_row(s, i); }
     }
 
-    let row_count = bottom - count + 1 - top;
-    let copy_cells = (row_count as i64) * s.cols;
-    let dst_base = (top as i64) * s.cols;
-    let src_base = ((top + count) as i64) * s.cols;
-    for idx in 0..copy_cells {
-        s.cells[dst_base + idx] = s.cells[src_base + idx];
-    }
-    for r in 0..row_count {
-        let dst_r = top + r;
-        let src_r = top + count + r;
-        if dst_r < s.prompt_rows.len && src_r < s.prompt_rows.len {
-            s.prompt_rows[dst_r] = s.prompt_rows[src_r];
-        }
-        if dst_r < s.wrapped_rows.len && src_r < s.wrapped_rows.len {
-            s.wrapped_rows[dst_r] = s.wrapped_rows[src_r];
-        }
-    }
-    for r in top..(bottom + 1) {
-        if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
-    }
-
     let ec = erase_cell(s);
-    let clear_start = ((bottom - count + 1) as i64) * s.cols;
-    let clear_total = (count as i64) * s.cols;
-    for idx in 0..clear_total {
-        s.cells[clear_start + idx] = ec;
-    }
-    for r in (bottom - count + 1)..(bottom + 1) {
-        if r < s.prompt_rows.len { s.prompt_rows[r] = 0; }
-        if r < s.wrapped_rows.len { s.wrapped_rows[r] = 0; }
-    }
+    screen_scroll_up(s.cells[..], s.cols, top, bottom, count,
+                     s.prompt_rows[..], s.wrapped_rows[..], s.dirty_rows[..],
+                     ec.fg, ec.bg);
 }
 
 fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
@@ -348,14 +326,7 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
     let count = if n > (bottom - top + 1) { bottom - top + 1 } else { n };
 
     let row_count = bottom - count + 1 - top;
-    let copy_cells = (row_count as i64) * s.cols;
-    let dst_base = ((top + count) as i64) * s.cols;
-    let src_base = (top as i64) * s.cols;
-    var idx = copy_cells - 1;
-    while idx >= 0 {
-        s.cells[dst_base + idx] = s.cells[src_base + idx];
-        idx -= 1;
-    }
+    cells_scroll_down(s.cells[..], s.cols, top, bottom, count);
     var r = row_count - 1;
     while r >= 0 {
         let dst_r = top + count + r;
@@ -375,9 +346,7 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
     let ec = erase_cell(s);
     let clear_start = (top as i64) * s.cols;
     let clear_total = (count as i64) * s.cols;
-    for c in 0..clear_total {
-        s.cells[clear_start + c] = ec;
-    }
+    cells_fill(s.cells[..], clear_start, clear_total, ec.fg, ec.bg);
     for r in top..(top + count) {
         if r < s.prompt_rows.len { s.prompt_rows[r] = 0; }
         if r < s.wrapped_rows.len { s.wrapped_rows[r] = 0; }
@@ -780,22 +749,24 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
     s.sb_cells.clear();
     s.sb_prompt_rows.clear();
     s.sb_wrapped_rows.clear();
+    s.sb_cols = nc;
+    s.sb_head = 0;
+    s.sb_count = 0;
     if s.sb_cap_lines > 0 {
-        for _ in 0..((s.sb_cap_lines as i64) * nc) { s.sb_cells.push(b); }
-        for _ in 0..s.sb_cap_lines { s.sb_prompt_rows.push(0); s.sb_wrapped_rows.push(0); }
-
         let sb_take_start = if sb_count > s.sb_cap_lines { sb_count - s.sb_cap_lines } else { 0 };
         let sb_take_count = sb_count - sb_take_start;
         for i in 0..sb_take_count {
             let src_r = sb_take_start + i;
             let src_base = (src_r as i64) * nc;
             let dst_base = (i as i64) * nc;
+            while s.sb_cells.len < dst_base + nc { s.sb_cells.push(b); }
             for c in 0..nc {
                 s.sb_cells[dst_base + c] = reflowed_rows[src_base + c];
             }
-            s.sb_wrapped_rows[i] = reflowed_wrapped[src_r];
-            s.sb_prompt_rows[i] = reflowed_prompts[src_r];
+            s.sb_wrapped_rows.push(reflowed_wrapped[src_r]);
+            s.sb_prompt_rows.push(reflowed_prompts[src_r]);
         }
+        s.sb_count = sb_take_count;
     }
 
     s.scroll_top = 0; s.scroll_bottom = nr - 1;
@@ -832,7 +803,8 @@ fn history_cell(s: Screen&, abs_line: i32, col: i32) -> Cell {
     if abs_line < s.sb_count {
         if col >= s.sb_cols { return blank_cell(s); }
         let line_idx = (s.sb_head + abs_line) % s.sb_cap_lines;
-        return s.sb_cells[(line_idx as i64) * s.sb_cols + col];
+        let idx = (line_idx as i64) * s.sb_cols + col;
+        return if idx >= 0 && idx < s.sb_cells.len { s.sb_cells[idx] } else { blank_cell(s) };
     }
     let live_row = abs_line - s.sb_count;
     return s.cells[(live_row as i64) * s.cols + col];

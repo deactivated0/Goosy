@@ -32,7 +32,7 @@
 
 **Goosy** is an ultra-fast, lightweight, zero-overhead native Wayland terminal emulator designed for high-performance Linux workflows. 
 
-Engineered in the [Goose programming language](https://aardappel.github.io/goose/) by Wouter van Oortmerssen ([aardappel/goose](https://github.com/aardappel/goose)), Goosy couples a memory-safe, expressive terminal state machine with an auditable, minimal C99 systems substrate for direct Linux POSIX PTY, `epoll`/`signalfd`, native Wayland client protocols (`xdg-shell`, `zxdg_decoration_manager_v1`, `zwp_primary_selection_device_manager_v1`, `wp_fractional_scale_v1`), FreeType2/Fontconfig/HarfBuzz font rasterization, and Pixman software composition.
+Engineered in the [Goose programming language](https://aardappel.github.io/goose/) by Wouter van Oortmerssen ([aardappel/goose](https://github.com/aardappel/goose)), Goosy couples a memory-safe, expressive terminal state machine with an auditable, minimal C99 systems substrate for direct Linux POSIX PTY, `epoll`/`signalfd`, native Wayland client protocols (`xdg-shell`, `zxdg_decoration_manager_v1`, `zwp_primary_selection_device_manager_v1`, `wp_fractional_scale_v1`), FreeType2/Fontconfig/HarfBuzz font rasterization, and three production-ready rendering backends: **Hardware Vulkan**, **Hardware OpenGL ES**, and **Software Pixman**.
 
 ---
 
@@ -52,9 +52,13 @@ Engineered in the [Goose programming language](https://aardappel.github.io/goose
 
 ## Why Goosy?
 
-- ⚡ **Blazing Startup (< 47 ms) & Microscopic Footprint**: Standalone ~300 KB binary. Consumes only 38 MB steady idle RSS (28 MB PSS). Zero Electron, zero Chromium, zero GTK/Qt heavy runtime dependencies.
+- ⚡ **Blazing Startup (29–56 ms) & Microscopic Footprint**: Standalone ~370 KB binary. Consumes only 18.6 MB steady idle RSS on Pixman (42 MB on Vulkan). Zero Electron, zero Chromium, zero GTK/Qt heavy runtime dependencies.
+- 🎨 **Three Functional Rendering Backends**:
+  - **Vulkan**: Hardware GPU rendering via `VK_KHR_wayland_surface` with embedded SPIR-V shader bytecode.
+  - **OpenGL**: Hardware GPU rendering via EGL and OpenGL ES 2.0+ & `wayland-egl`.
+  - **Pixman**: High-performance software universal fallback using `wl_shm` with zero GPU driver dependency.
 - 🪿 **Dual-Language Systems Architecture**: 100% memory-safe Goose terminal state machine and ANSI/VT parser combined with a minimal, auditable C99 Wayland bridge.
-- 🎯 **Mathematical Pixel-Perfect Rendering**: Zero-displacement text selection highlight—cell baselines and character alignments remain 100% invariant between typing and selecting. Procedural box-drawing (`U+2500..U+257F`) and block elements (`U+2580..U+259F`) are drawn with integer coordinates directly in Pixman to avoid font-scaling seams or misalignment in TUIs.
+- 🎯 **Mathematical Pixel-Perfect Rendering**: Zero-displacement text selection highlight—cell baselines and character alignments remain 100% invariant between typing and selecting. Procedural box-drawing (`U+2500..U+257F`) and block elements (`U+2580..U+259F`) are drawn with integer coordinates directly in all backends to avoid font-scaling seams or misalignment in TUIs.
 - 🖼️ **Modern Terminal Graphics**:
   - **Kitty Graphics Protocol**: RGB, RGBA, and PNG support with multi-packet chunked reassembly (`m=1`/`m=0`), targeted deletion by ID (`a=d, i=<id>`), and bounded memory allocations.
   - **Sixel Graphics**: Fast software rasterization with strict 4096&times;4096 dimension protection.
@@ -77,19 +81,21 @@ Tested under Linux 7.3.4 (`x86_64`) on a native Wayland compositor. Measurements
 
 | Terminal Emulator | Binary Size | Cold Startup | Steady Idle RSS | Steady Idle PSS | Idle CPU (2s) | Stream Throughput | Architecture / UI Toolkit |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
-| **Goosy** | **0.30 MB** | **46.1 ms** | **38.6 MB** | **28.5 MB** | **0 ticks (0%)** | **10.4 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
-| **Foot** | 0.48 MB | 50.4 ms | 21.0 MB | 8.0 MB | 0 ticks (0%) | 37.6 MB/s | Pure C / Custom Wayland |
-| **Alacritty** | 8.30 MB | 150.3 ms | 94.2 MB | 38.0 MB | 0 ticks (0%) | 21.3 MB/s | Rust / OpenGL (winit) |
-| **Kitty** | 0.10 MB* | 260.4 ms | 125.0 MB | 58.0 MB | 0 ticks (0%) | 15.1 MB/s | C + Python + OpenGL (*81 MB runtime) |
-| **Konsole** | 0.05 MB* | 266.4 ms | 103.6 MB | 49.9 MB | 0 ticks (0%) | 10.3 MB/s | C++ / Qt6 + KDE Frameworks (*10 MB core) |
+| **Goosy (Pixman)** | **0.37 MB** | **51.7 ms** (29.2 ms) | **24.4 MB** (18.6 ms) | **20.1 MB** | **0 ticks (0%)** | **13.2 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
+| **Goosy (Vulkan)** | **0.37 MB** | **56.3 ms** | **42.1 MB** | **37.6 MB** | **0 ticks (0%)** | **12.9 MB/s** | **Goose + Native Wayland / Vulkan (Hardware GPU)** |
+| **Goosy (OpenGL)** | **0.37 MB** | **79.1 ms** | **80.9 MB** | **76.0 MB** | **0 ticks (0%)** | **12.0 MB/s** | **Goose + Native Wayland / EGL (Hardware GPU)** |
+| **Foot** | 0.48 MB | 73.8 ms | 20.9 MB | 15.9 MB | 0 ticks (0%) | 46.4 MB/s | Pure C / Custom Wayland |
+| **Alacritty** | 8.30 MB | 137.3 ms | 93.2 MB | 88.0 MB | 0 ticks (0%) | 18.0 MB/s | Rust / OpenGL (winit) |
+| **Kitty** | 0.10 MB* | 278.2 ms | 124.9 MB | 113.9 MB | 0 ticks (0%) | 13.0 MB/s | C + Python + OpenGL (*81 MB runtime) |
+| **Konsole** | 0.10 MB* | 257.0 ms | 125.1 MB | 115.2 MB | 0 ticks (0%) | 11.8 MB/s | C++ / Qt6 + KDE Frameworks (*10 MB core) |
 
-*\*Note: Kitty and Konsole binary sizes reflect dynamic launcher stubs; their installed package footprints require 81.35 MiB and 10.51 MiB of runtime libraries respectively. Goosy is a fully self-contained ~300 KB standalone executable.*
+*\*Note: Kitty and Konsole binary sizes reflect dynamic launcher stubs; their installed package footprints require 81.35 MiB and 10.51 MiB of runtime libraries respectively. Goosy is a fully self-contained ~370 KB standalone executable.*
 
 ### Microbenchmarks
 
 - ⚡ **Font Glyph Cache Lookups**: **71,428,571 lookups/s** (1,000,000 lookups completed in 14 ms).
 - 🖼️ **Full-Frame Cell Composite Rate**: **751.9 FPS** (100 full frames of 120&times;40 cells / 480,000 cells composited in 133 ms; ~3,609,022 cells/s).
-- 📜 **History Scrollback Throughput**: **30,921 lines/s** (50,000 line scrollback operations in 1,617 ms &mdash; **2.40&times; performance improvement**).
+- 📜 **History Scrollback Throughput**: **245,098 lines/s** (50,000 line scrollback operations in 204 ms &mdash; **8.0&times; performance improvement**).
 
 ---
 

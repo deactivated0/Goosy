@@ -21,7 +21,9 @@ def find_goosy():
 
 goosy_bin = find_goosy()
 TERMS = [
-    ("Goosy", goosy_bin, [goosy_bin]),
+    ("Goosy (Pixman)", goosy_bin, [goosy_bin, "--renderer=pixman"]),
+    ("Goosy (OpenGL)", goosy_bin, [goosy_bin, "--renderer=opengl"]),
+    ("Goosy (Vulkan)", goosy_bin, [goosy_bin, "--renderer=vulkan"]),
     ("Foot", "foot", ["foot"]),
     ("Alacritty", "alacritty", ["alacritty"]),
     ("Kitty", "kitty", ["kitty"]),

@@ -9,6 +9,9 @@ c_sources = [
     "native/goosy_wayland.c",
     "native/goosy_font.c",
     "native/goosy_render.c",
+    "native/goosy_render_pixman.c",
+    "native/goosy_render_gl.c",
+    "native/goosy_render_vk.c",
     "native/goosy_image.c",
     "native/generated/xdg-shell-protocol.c",
     "native/generated/xdg-decoration-unstable-v1-protocol.c",
@@ -42,6 +45,10 @@ c_flags_cc = [
 c_libs_linux = [
     "wayland-client",
     "wayland-cursor",
+    "wayland-egl",
+    "EGL",
+    "GLESv2",
+    "vulkan",
     "pixman-1",
     "freetype",
     "fontconfig",
@@ -49,6 +56,8 @@ c_libs_linux = [
     "xkbcommon",
     "png",
     "m",
+    "pthread",
+    "rt",
 ];
 
 main_thread_only = true;

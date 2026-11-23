@@ -778,6 +778,18 @@ int32_t goosy_wl_width(void)       { return g_width; }
 int32_t goosy_wl_height(void)      { return g_height; }
 int32_t goosy_wl_scale(void)       { return g_scale; }
 bool    goosy_wl_frame_ready(void) { return g_frame_ready; }
+void    goosy_wl_request_frame_callback(void) {
+    if (!g_surface) return;
+    if (!g_frame_cb) {
+        g_frame_cb = wl_surface_frame(g_surface);
+        wl_callback_add_listener(g_frame_cb, &g_frame_listener, NULL);
+        g_frame_ready = false;
+        wl_surface_commit(g_surface);
+        wl_display_flush(g_display);
+    }
+}
+struct wl_display *goosy_wl_get_display(void) { return g_display; }
+struct wl_surface *goosy_wl_get_surface(void) { return g_surface; }
 
 int32_t goosy_wl_is_maximized(void)  { return g_is_maximized ? 1 : 0; }
 int32_t goosy_wl_is_fullscreen(void) { return g_is_fullscreen ? 1 : 0; }

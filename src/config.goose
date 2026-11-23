@@ -32,6 +32,7 @@ struct Config {
     title_bar_height: i32 = 28,
     decorations: i32 = DECO_CLIENT, // 0=auto, 1=server, 2=client, 3=none
     remember_window_size: bool = true,
+    renderer_backend: i32 = 0, // 0=auto, 1=vulkan, 2=opengl, 3=pixman
     palette: colors::Palette = colors::Palette { .. },
 }
 
@@ -164,6 +165,13 @@ fn apply_kv(cfg: Config&, section: const u8[:], key: const u8[:], raw_val: const
     } else if eq_str(section, "security") {
         if eq_str(key, "allow_osc52") || eq_str(key, "allow-osc52") {
             cfg.allow_osc52 = eq_str(val, "true") || eq_str(val, "yes");
+        }
+    } else if eq_str(section, "rendering") || eq_str(section, "renderer") {
+        if eq_str(key, "backend") {
+            if eq_str(val, "vulkan") || eq_str(val, "vk") { cfg.renderer_backend = 1; }
+            else if eq_str(val, "opengl") || eq_str(val, "gl") || eq_str(val, "gles") { cfg.renderer_backend = 2; }
+            else if eq_str(val, "pixman") || eq_str(val, "software") || eq_str(val, "sw") { cfg.renderer_backend = 3; }
+            else { cfg.renderer_backend = 0; }
         }
     } else if eq_str(section, "colors") {
         let rgb, ok = colors::parse_hex(val);

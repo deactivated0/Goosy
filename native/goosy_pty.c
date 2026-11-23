@@ -77,6 +77,7 @@ static char    g_cmdline_cwd[1024]  = {0};
 static char   *g_cmdline_exec_argv[128];
 static int     g_cmdline_exec_argc  = 0;
 static char    g_cmdline_raw_buf[4096];
+static int32_t g_cmdline_renderer   = 0;
 
 static void parse_cmdline_if_needed(void) {
     if (g_cmdline_parsed) return;
@@ -148,6 +149,36 @@ static void parse_cmdline_if_needed(void) {
             }
         } else if (strncmp(p, "-D=", 3) == 0) {
             strncpy(g_cmdline_cwd, p + 3, sizeof(g_cmdline_cwd) - 1);
+        } else if (strcmp(p, "--renderer-info") == 0) {
+            goosy_renderer_print_info();
+            exit(0);
+        } else if (strncmp(p, "--renderer=", 11) == 0) {
+            const char *val = p + 11;
+            if (strcmp(val, "vulkan") == 0 || strcmp(val, "vk") == 0) {
+                g_cmdline_renderer = 1;
+            } else if (strcmp(val, "opengl") == 0 || strcmp(val, "gl") == 0 || strcmp(val, "gles") == 0) {
+                g_cmdline_renderer = 2;
+            } else if (strcmp(val, "pixman") == 0 || strcmp(val, "sw") == 0 || strcmp(val, "software") == 0) {
+                g_cmdline_renderer = 3;
+            } else {
+                g_cmdline_renderer = 0;
+            }
+        } else if (strcmp(p, "--renderer") == 0 || strcmp(p, "-r") == 0) {
+            while (p < end && *p != '\0') p++;
+            if (p < end) p++;
+            if (p < end && *p != '\0') {
+                if (strcmp(p, "vulkan") == 0 || strcmp(p, "vk") == 0) {
+                    g_cmdline_renderer = 1;
+                } else if (strcmp(p, "opengl") == 0 || strcmp(p, "gl") == 0 || strcmp(p, "gles") == 0) {
+                    g_cmdline_renderer = 2;
+                } else if (strcmp(p, "pixman") == 0 || strcmp(p, "sw") == 0 || strcmp(p, "software") == 0) {
+                    g_cmdline_renderer = 3;
+                } else {
+                    g_cmdline_renderer = 0;
+                }
+            } else {
+                break;
+            }
         } else if (strcmp(p, "--hold") == 0) {
             g_cmdline_hold = true;
         } else if (strcmp(p, "-e") == 0 || strcmp(p, "--") == 0) {
@@ -185,9 +216,18 @@ int32_t goosy_cmdline_rows(void) {
     return g_cmdline_rows;
 }
 
+__attribute__((weak)) void goosy_renderer_print_info(void) {
+    printf("Goosy Rendering Subsystem Info\n");
+}
+
 int32_t goosy_cmdline_has_custom_size(void) {
     parse_cmdline_if_needed();
     return g_cmdline_has_size ? 1 : 0;
+}
+
+int32_t goosy_cmdline_renderer(void) {
+    parse_cmdline_if_needed();
+    return g_cmdline_renderer;
 }
 
 int32_t goosy_cmdline_hold(void) {
@@ -389,10 +429,19 @@ int64_t goosy_pty_read(goosy_bytes_t buf) {
 #define PTY_INITIAL_CAP (64 * 1024)
 #define PTY_MAX_CAP     (16 * 1024 * 1024)
 
-static uint8_t *g_write_buf  = NULL;
-static size_t   g_write_cap  = 0;
-static size_t   g_write_head = 0;
-static size_t   g_write_tail = 0;
+typedef struct pty_chunk {
+    struct pty_chunk *next;
+    size_t len;
+    size_t pos;
+    uint8_t data[];
+} pty_chunk_t;
+
+static uint8_t     *g_write_buf      = NULL;
+static size_t       g_write_cap      = 0;
+static size_t       g_write_head     = 0;
+static size_t       g_write_tail     = 0;
+static pty_chunk_t *g_overflow_head  = NULL;
+static pty_chunk_t *g_overflow_tail  = NULL;
 
 static size_t pty_write_buf_len(void) {
     if (!g_write_buf || g_write_cap == 0) return 0;
@@ -438,26 +487,65 @@ static bool pty_write_buf_grow(size_t needed) {
 }
 
 int32_t goosy_pty_has_pending_write(void) {
-    return pty_write_buf_len() > 0 ? 1 : 0;
+    return (pty_write_buf_len() > 0 || g_overflow_head != NULL) ? 1 : 0;
 }
 
 int64_t goosy_pty_flush(void) {
-    if (g_master_fd < 0 || !g_write_buf || g_write_cap == 0) return -1;
-    while (g_write_head != g_write_tail) {
-        size_t chunk = (g_write_tail > g_write_head) ? (g_write_tail - g_write_head) : (g_write_cap - g_write_head);
-        ssize_t n = write(g_master_fd, g_write_buf + g_write_head, chunk);
-        if (n > 0) {
-            g_write_head = (g_write_head + (size_t)n) % g_write_cap;
-        } else if (n < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+    if (g_master_fd < 0) return -1;
+
+    /* 1. Drain circular buffer to master PTY */
+    if (g_write_buf && g_write_cap > 0) {
+        while (g_write_head != g_write_tail) {
+            size_t chunk = (g_write_tail > g_write_head) ? (g_write_tail - g_write_head) : (g_write_cap - g_write_head);
+            ssize_t n = write(g_master_fd, g_write_buf + g_write_head, chunk);
+            if (n > 0) {
+                g_write_head = (g_write_head + (size_t)n) % g_write_cap;
+            } else if (n < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                    break;
+                }
+                return -1;
+            } else {
                 break;
             }
-            return -1;
-        } else {
-            break;
         }
     }
-    return (int64_t)pty_write_buf_len();
+
+    /* 2. Pump pending overflow chunks into circular buffer */
+    while (g_overflow_head && pty_write_buf_free() > 0) {
+        size_t avail = pty_write_buf_free();
+        size_t chunk_rem = g_overflow_head->len - g_overflow_head->pos;
+        size_t to_move = chunk_rem < avail ? chunk_rem : avail;
+        size_t first = g_write_cap - g_write_tail;
+        if (to_move <= first) {
+            memcpy(g_write_buf + g_write_tail, g_overflow_head->data + g_overflow_head->pos, to_move);
+            g_write_tail = (g_write_tail + to_move) % g_write_cap;
+        } else {
+            memcpy(g_write_buf + g_write_tail, g_overflow_head->data + g_overflow_head->pos, first);
+            memcpy(g_write_buf, g_overflow_head->data + g_overflow_head->pos + first, to_move - first);
+            g_write_tail = to_move - first;
+        }
+        g_overflow_head->pos += to_move;
+        if (g_overflow_head->pos >= g_overflow_head->len) {
+            pty_chunk_t *next = g_overflow_head->next;
+            free(g_overflow_head);
+            g_overflow_head = next;
+            if (!g_overflow_head) g_overflow_tail = NULL;
+        }
+
+        /* Attempt to flush newly moved bytes immediately */
+        while (g_write_head != g_write_tail) {
+            size_t chunk = (g_write_tail > g_write_head) ? (g_write_tail - g_write_head) : (g_write_cap - g_write_head);
+            ssize_t n = write(g_master_fd, g_write_buf + g_write_head, chunk);
+            if (n > 0) {
+                g_write_head = (g_write_head + (size_t)n) % g_write_cap;
+            } else {
+                break;
+            }
+        }
+    }
+
+    return (int64_t)(pty_write_buf_len() + (g_overflow_head ? 1024 : 0));
 }
 
 int64_t goosy_pty_write(goosy_const_bytes_t data) {
@@ -470,11 +558,11 @@ int64_t goosy_pty_write(goosy_const_bytes_t data) {
         g_write_head = 0;
         g_write_tail = 0;
     }
-    if (g_write_head != g_write_tail) {
+    if (g_write_head != g_write_tail || g_overflow_head != NULL) {
         goosy_pty_flush();
     }
     size_t written = 0;
-    if (g_write_head == g_write_tail) {
+    if (g_write_head == g_write_tail && g_overflow_head == NULL) {
         ssize_t n = write(g_master_fd, data.data, (size_t)data.len);
         if (n > 0) {
             written = (size_t)n;
@@ -484,7 +572,7 @@ int64_t goosy_pty_write(goosy_const_bytes_t data) {
     }
     if (written < (size_t)data.len) {
         size_t rem = (size_t)data.len - written;
-        if (rem > pty_write_buf_free()) {
+        if (rem > pty_write_buf_free() && pty_write_buf_free() < PTY_MAX_CAP) {
             size_t needed = pty_write_buf_len() + rem + 1;
             pty_write_buf_grow(needed);
         }
@@ -501,6 +589,25 @@ int64_t goosy_pty_write(goosy_const_bytes_t data) {
                 g_write_tail = to_queue - first;
             }
             written += to_queue;
+        }
+        /* If circular buffer is completely full, queue in overflow chain (zero data loss) */
+        if (written < (size_t)data.len) {
+            size_t overflow_bytes = (size_t)data.len - written;
+            pty_chunk_t *chunk = (pty_chunk_t *)malloc(sizeof(pty_chunk_t) + overflow_bytes);
+            if (chunk) {
+                chunk->next = NULL;
+                chunk->len = overflow_bytes;
+                chunk->pos = 0;
+                memcpy(chunk->data, data.data + written, overflow_bytes);
+                if (g_overflow_tail) {
+                    g_overflow_tail->next = chunk;
+                    g_overflow_tail = chunk;
+                } else {
+                    g_overflow_head = chunk;
+                    g_overflow_tail = chunk;
+                }
+                written += overflow_bytes;
+            }
         }
     }
     return (int64_t)written;
@@ -558,7 +665,185 @@ int32_t goosy_pty_exit_code(void) {
     return g_exit_code;
 }
 
+void goosy_cells_scroll_up(goosy_cells_slice_t cells, int32_t cols, int32_t top, int32_t bottom, int32_t count) {
+    if (!cells.data || cols <= 0 || count <= 0 || top < 0 || bottom < top || count > (bottom - top + 1)) return;
+    int32_t row_count = bottom - count + 1 - top;
+    if (row_count <= 0) return;
+    size_t cell_sz = sizeof(goosy_cell_t);
+    size_t copy_bytes = (size_t)row_count * (size_t)cols * cell_sz;
+    uint8_t *base = (uint8_t *)cells.data;
+    uint8_t *dst = base + (size_t)top * (size_t)cols * cell_sz;
+    uint8_t *src = base + (size_t)(top + count) * (size_t)cols * cell_sz;
+    memmove(dst, src, copy_bytes);
+}
+
+void goosy_cells_scroll_down(goosy_cells_slice_t cells, int32_t cols, int32_t top, int32_t bottom, int32_t count) {
+    if (!cells.data || cols <= 0 || count <= 0 || top < 0 || bottom < top || count > (bottom - top + 1)) return;
+    int32_t row_count = bottom - count + 1 - top;
+    if (row_count <= 0) return;
+    size_t cell_sz = sizeof(goosy_cell_t);
+    size_t copy_bytes = (size_t)row_count * (size_t)cols * cell_sz;
+    uint8_t *base = (uint8_t *)cells.data;
+    uint8_t *dst = base + (size_t)(top + count) * (size_t)cols * cell_sz;
+    uint8_t *src = base + (size_t)top * (size_t)cols * cell_sz;
+    memmove(dst, src, copy_bytes);
+}
+
+void goosy_screen_scroll_up(goosy_cells_slice_t cells, int32_t cols, int32_t top, int32_t bottom, int32_t count,
+                            goosy_bytes_t prompt_rows, goosy_bytes_t wrapped_rows, goosy_bytes_t dirty_rows,
+                            uint32_t fg, uint32_t bg) {
+    if (!cells.data || cols <= 0 || count <= 0 || top < 0 || bottom < top || count > (bottom - top + 1)) return;
+    int32_t row_count = bottom - count + 1 - top;
+    size_t cell_sz = sizeof(goosy_cell_t);
+    uint8_t *base = (uint8_t *)cells.data;
+
+    if (row_count > 0) {
+        size_t copy_bytes = (size_t)row_count * (size_t)cols * cell_sz;
+        uint8_t *dst = base + (size_t)top * (size_t)cols * cell_sz;
+        uint8_t *src = base + (size_t)(top + count) * (size_t)cols * cell_sz;
+        memmove(dst, src, copy_bytes);
+
+        if (prompt_rows.data && prompt_rows.len > 0) {
+            int32_t limit = (int32_t)prompt_rows.len;
+            int32_t p_cnt = (top + count + row_count <= limit) ? row_count : (limit > top + count ? limit - (top + count) : 0);
+            if (p_cnt > 0) memmove(prompt_rows.data + top, prompt_rows.data + top + count, (size_t)p_cnt);
+        }
+        if (wrapped_rows.data && wrapped_rows.len > 0) {
+            int32_t limit = (int32_t)wrapped_rows.len;
+            int32_t w_cnt = (top + count + row_count <= limit) ? row_count : (limit > top + count ? limit - (top + count) : 0);
+            if (w_cnt > 0) memmove(wrapped_rows.data + top, wrapped_rows.data + top + count, (size_t)w_cnt);
+        }
+    }
+
+    if (dirty_rows.data && dirty_rows.len > 0) {
+        int32_t d_top = top < dirty_rows.len ? top : (int32_t)dirty_rows.len;
+        int32_t d_bot = bottom < dirty_rows.len ? bottom : (int32_t)dirty_rows.len - 1;
+        if (d_bot >= d_top) {
+            memset(dirty_rows.data + d_top, 2, (size_t)(d_bot - d_top + 1));
+        }
+    }
+
+    int32_t clear_top = bottom - count + 1;
+    if (clear_top <= bottom) {
+        int64_t clear_start = (int64_t)clear_top * cols;
+        int64_t clear_total = (int64_t)count * cols;
+        goosy_cells_fill(cells, clear_start, clear_total, fg, bg);
+
+        if (prompt_rows.data && clear_top < prompt_rows.len) {
+            int32_t p_end = bottom < prompt_rows.len ? bottom : (int32_t)prompt_rows.len - 1;
+            if (p_end >= clear_top) memset(prompt_rows.data + clear_top, 0, (size_t)(p_end - clear_top + 1));
+        }
+        if (wrapped_rows.data && clear_top < wrapped_rows.len) {
+            int32_t w_end = bottom < wrapped_rows.len ? bottom : (int32_t)wrapped_rows.len - 1;
+            if (w_end >= clear_top) memset(wrapped_rows.data + clear_top, 0, (size_t)(w_end - clear_top + 1));
+        }
+    }
+}
+
+void goosy_push_scrollback(goosy_cells_slice_t sb_cells, int32_t sb_cols, int32_t dst_line,
+                           goosy_cells_slice_t cells, int32_t cols, int32_t row,
+                           goosy_bytes_t sb_prompt, goosy_bytes_t sb_wrapped,
+                           goosy_const_bytes_t prompt_rows, goosy_const_bytes_t wrapped_rows) {
+    if (!sb_cells.data || !cells.data || sb_cols <= 0 || cols <= 0) return;
+    int64_t dst_base = (int64_t)dst_line * sb_cols;
+    int64_t src_base = (int64_t)row * cols;
+    if (dst_base < 0 || dst_base + sb_cols > sb_cells.len) return;
+    if (src_base < 0 || src_base + cols > cells.len) return;
+
+    size_t cell_sz = sizeof(goosy_cell_t);
+    int32_t copy_cols = cols < sb_cols ? cols : sb_cols;
+    uint8_t *dst = (uint8_t *)sb_cells.data + (size_t)dst_base * cell_sz;
+    const uint8_t *src = (const uint8_t *)cells.data + (size_t)src_base * cell_sz;
+
+    memcpy(dst, src, (size_t)copy_cols * cell_sz);
+    if (sb_cols > copy_cols) {
+        goosy_cell_t blank;
+        memset(&blank, 0, sizeof(blank));
+        blank.cp = 0x20;
+        blank.width = 1;
+        goosy_cell_t *pad_dst = (goosy_cell_t *)sb_cells.data + dst_base + copy_cols;
+        for (int32_t c = 0; c < sb_cols - copy_cols; c++) pad_dst[c] = blank;
+    }
+
+    if (sb_prompt.data && dst_line < sb_prompt.len) {
+        sb_prompt.data[dst_line] = (prompt_rows.data && row < prompt_rows.len) ? prompt_rows.data[row] : 0;
+    }
+    if (sb_wrapped.data && dst_line < sb_wrapped.len) {
+        sb_wrapped.data[dst_line] = (wrapped_rows.data && row < wrapped_rows.len) ? wrapped_rows.data[row] : 0;
+    }
+}
+
+void goosy_cells_copy(goosy_cells_slice_t dst, int64_t dst_offset, goosy_cells_slice_t src, int64_t src_offset, int64_t count) {
+    if (!dst.data || !src.data || count <= 0) return;
+    if (dst_offset < 0 || dst_offset + count > dst.len) return;
+    if (src_offset < 0 || src_offset + count > src.len) return;
+    size_t cell_sz = sizeof(goosy_cell_t);
+    uint8_t *d = (uint8_t *)dst.data + (size_t)dst_offset * cell_sz;
+    const uint8_t *s = (const uint8_t *)src.data + (size_t)src_offset * cell_sz;
+    memmove(d, s, (size_t)count * cell_sz);
+}
+
+void goosy_cells_fill(goosy_cells_slice_t cells, int64_t start_idx, int64_t count, uint32_t fg, uint32_t bg) {
+    if (!cells.data || count <= 0 || start_idx < 0 || start_idx + count > cells.len) return;
+    goosy_cell_t blank;
+    memset(&blank, 0, sizeof(blank));
+    blank.cp = 0x20;
+    blank.fg = fg;
+    blank.bg = bg;
+    blank.width = 1;
+    goosy_cell_t *arr = (goosy_cell_t *)cells.data + start_idx;
+    for (int64_t i = 0; i < count; i++) {
+        arr[i] = blank;
+    }
+}
+
+int32_t goosy_cells_write_ascii(goosy_cells_slice_t cells, int64_t row_base, int32_t cx,
+                                goosy_const_bytes_t data, int64_t data_pos, int32_t max_count,
+                                uint32_t fg, uint32_t bg, uint32_t attrs,
+                                uint32_t ul_style, uint32_t ul_color, uint32_t link_id) {
+    if (!cells.data || !data.data || max_count <= 0 || data_pos < 0 || data_pos >= data.len) return 0;
+    int64_t avail = data.len - data_pos;
+    int32_t limit = (int32_t)(avail < (int64_t)max_count ? avail : (int64_t)max_count);
+    if (limit <= 0) return 0;
+
+    const uint8_t *src = data.data + data_pos;
+    int32_t count = 0;
+    while (count < limit) {
+        uint8_t b = src[count];
+        if (b < 0x20 || b >= 0x7F) break;
+        count++;
+    }
+    if (count <= 0) return 0;
+
+    int64_t dst_idx = row_base + cx;
+    if (dst_idx < 0 || dst_idx + count > cells.len) return 0;
+
+    goosy_cell_t *dst = (goosy_cell_t *)cells.data + dst_idx;
+    goosy_cell_t tmpl;
+    memset(&tmpl, 0, sizeof(tmpl));
+    tmpl.fg = fg;
+    tmpl.bg = bg;
+    tmpl.attrs = (uint16_t)attrs;
+    tmpl.width = 1;
+    tmpl.ul_style = (uint8_t)ul_style;
+    tmpl.ul_color = ul_color;
+    tmpl.link_id = link_id;
+
+    for (int32_t i = 0; i < count; i++) {
+        tmpl.cp = (uint32_t)src[i];
+        dst[i] = tmpl;
+    }
+    return count;
+}
+
 void goosy_pty_close(void) {
+    while (g_overflow_head) {
+        pty_chunk_t *next = g_overflow_head->next;
+        free(g_overflow_head);
+        g_overflow_head = next;
+    }
+    g_overflow_tail = NULL;
+
     if (g_write_buf) {
         free(g_write_buf);
         g_write_buf = NULL;

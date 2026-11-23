@@ -2,10 +2,11 @@
 
 ## Threat Model & Boundaries
 Goosy interacts with:
-1. Untrusted terminal data streams (VT/ANSI sequences from local and remote shells).
-2. Graphic image payloads (Sixel and Kitty graphics streams).
+1. Untrusted terminal data streams (VT/ANSI escape sequences from local and remote child shells).
+2. Graphic image payloads (Sixel and Kitty graphics data streams).
 3. Clipboard data (OSC 52 and Wayland selection transfers).
-4. System environment and command line arguments.
+4. System environment, command line arguments, and URLs.
+5. GPU drivers and rendering pipelines (Vulkan and OpenGL/EGL).
 
 ---
 
@@ -37,3 +38,10 @@ Goosy interacts with:
 - **Location:** `native/goosy_pty.c:goosy_open_url`
 - **Issue:** Must guarantee that URLs are strictly validated for safe schemes (`http://`, `https://`) and executed directly via `fork` + `execv` with `xdg-open`, never passed to a shell (`sh -c` or `system()`).
 - **Status:** Verified safe in `native/goosy_pty.c` (uses `execvp("xdg-open", ...)` directly without shell).
+
+### 5. GPU Resource Safety & Shader Injection Prevention
+- **Severity:** Medium (GPU Hang / Driver Crash)
+- **Location:** `native/goosy_render_vk.c`, `native/goosy_render_gl.c`
+- **Issue:** Dynamic compilation of runtime GLSL shaders could introduce shader compiler crashes or memory leaks in proprietary drivers.
+- **Fix:** Vulkan shaders are precompiled to embedded SPIR-V bytecode headers (`native/goosy_vk_shaders.h`), eliminating runtime shader compilation completely. OpenGL shaders use strict, statically audited minimal GLSL 1.00 ES shaders. Host-coherent vertex streaming uses bounded ring buffers with explicit quad count clamping (max 65,536 quads).
+- **Status:** Resolved & Verified.

@@ -120,6 +120,9 @@ extern fn render_damage(x: i32, y: i32, w: i32, h: i32) = "goosy_render_damage";
 extern fn render_images(pad_px: i32, title_h: i32, view_top_abs_row: i32,
                         rows: i32, cols: i32, cell_w: i32, cell_h: i32) = "goosy_render_images";
 extern fn render_end(request_frame_cb: bool) = "goosy_render_end";
+extern fn renderer_init(pref_type: i32) -> i32 = "goosy_renderer_init";
+extern fn renderer_resize(width_px: i32, height_px: i32, scale: i32) = "goosy_renderer_resize";
+extern fn renderer_close() = "goosy_render_close";
 
 // Sixel & Kitty Graphics Protocols
 extern fn sixel_decode(data: const u8[:], col: i32, abs_row: i32, cell_w: i32, cell_h: i32) -> i32 = "goosy_sixel_decode";
@@ -138,3 +141,4 @@ extern fn cmdline_cols() -> i32 = "goosy_cmdline_cols";
 extern fn cmdline_rows() -> i32 = "goosy_cmdline_rows";
 extern fn cmdline_has_custom_size() -> i32 = "goosy_cmdline_has_custom_size";
 extern fn cmdline_hold() -> i32 = "goosy_cmdline_hold";
+extern fn cmdline_renderer() -> i32 = "goosy_cmdline_renderer";

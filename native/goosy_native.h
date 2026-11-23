@@ -26,6 +26,40 @@ typedef struct {
     int64_t len;
 } goosy_bytes_t;
 
+typedef struct {
+    void   *data;
+    int64_t len;
+} goosy_cells_slice_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t cp;
+    uint32_t combining;
+    uint32_t fg;
+    uint32_t bg;
+    uint16_t attrs;
+    uint8_t  width;
+    uint8_t  flags;
+    uint8_t  ul_style;
+    uint32_t ul_color;
+    uint32_t link_id;
+} goosy_cell_t;
+
+void goosy_cells_scroll_up(goosy_cells_slice_t cells, int32_t cols, int32_t top, int32_t bottom, int32_t count);
+void goosy_cells_scroll_down(goosy_cells_slice_t cells, int32_t cols, int32_t top, int32_t bottom, int32_t count);
+void goosy_screen_scroll_up(goosy_cells_slice_t cells, int32_t cols, int32_t top, int32_t bottom, int32_t count,
+                            goosy_bytes_t prompt_rows, goosy_bytes_t wrapped_rows, goosy_bytes_t dirty_rows,
+                            uint32_t fg, uint32_t bg);
+void goosy_push_scrollback(goosy_cells_slice_t sb_cells, int32_t sb_cols, int32_t dst_line,
+                           goosy_cells_slice_t cells, int32_t cols, int32_t row,
+                           goosy_bytes_t sb_prompt, goosy_bytes_t sb_wrapped,
+                           goosy_const_bytes_t prompt_rows, goosy_const_bytes_t wrapped_rows);
+void goosy_cells_copy(goosy_cells_slice_t dst, int64_t dst_offset, goosy_cells_slice_t src, int64_t src_offset, int64_t count);
+void goosy_cells_fill(goosy_cells_slice_t cells, int64_t start_idx, int64_t count, uint32_t fg, uint32_t bg);
+int32_t goosy_cells_write_ascii(goosy_cells_slice_t cells, int64_t row_base, int32_t cx,
+                                goosy_const_bytes_t data, int64_t data_pos, int32_t max_count,
+                                uint32_t fg, uint32_t bg, uint32_t attrs,
+                                uint32_t ul_style, uint32_t ul_color, uint32_t link_id);
+
 /* -------------------------------------------------------------------------
  * Event types returned from native Wayland/input/PTY bridge to Goose
  * ------------------------------------------------------------------------- */
@@ -118,6 +152,9 @@ int32_t goosy_wl_width(void);
 int32_t goosy_wl_height(void);
 int32_t goosy_wl_scale(void);
 bool    goosy_wl_frame_ready(void);
+void    goosy_wl_request_frame_callback(void);
+struct wl_display *goosy_wl_get_display(void);
+struct wl_surface *goosy_wl_get_surface(void);
 int32_t goosy_wl_is_maximized(void);
 int32_t goosy_wl_is_fullscreen(void);
 int32_t goosy_wl_is_activated(void);
@@ -210,6 +247,7 @@ int32_t goosy_render_title_icon(int32_t x, int32_t y, int32_t size_px);
 void    goosy_render_images(int32_t pad_px, int32_t title_h, int32_t view_top_abs_row,
                            int32_t rows, int32_t cols, int32_t cell_w, int32_t cell_h);
 void    goosy_render_end(bool request_frame_cb);
+void    goosy_render_close(void);
 
 /* Sixel & Kitty Graphics */
 int32_t goosy_sixel_decode(goosy_const_bytes_t data, int32_t col, int32_t abs_row, int32_t cell_w, int32_t cell_h);
@@ -231,6 +269,8 @@ int32_t     goosy_cmdline_cols(void);
 int32_t     goosy_cmdline_rows(void);
 int32_t     goosy_cmdline_has_custom_size(void);
 int32_t     goosy_cmdline_hold(void);
+int32_t     goosy_cmdline_renderer(void);
+void        goosy_renderer_print_info(void);
 const char *goosy_cmdline_title(void);
 const char *goosy_cmdline_cwd(void);
 void        goosy_poll_detach_pty(void);

@@ -147,6 +147,13 @@ fn main() {
     }
     defer ffi::wl_close();
 
+    var pref_backend = ffi::cmdline_renderer();
+    if pref_backend == 0 {
+        pref_backend = cfg.renderer_backend;
+    }
+    ffi::renderer_init(pref_backend);
+    defer ffi::renderer_close();
+
     ffi::wl_set_decoration_mode(cfg.decorations);
 
     var scr = screen::Screen { .. };
@@ -229,6 +236,7 @@ fn main() {
                 let w = ffi::wl_ev_a();
                 let h = ffi::wl_ev_b();
                 let sc = ffi::wl_ev_c();
+                ffi::renderer_resize(w, h, sc);
                 let is_csd = cfg.title_bar && (ffi::wl_is_csd() != 0);
                 let title_h = if is_csd { cfg.title_bar_height * sc } else { 0 };
                 let nc, nr = calc_grid(w, h, sc, cfg.padding, ffi::font_cell_width(), ffi::font_cell_height(), title_h);
@@ -655,7 +663,7 @@ fn main() {
 
         if (ready & ffi::POLL_PTY) != 0 {
             var batch: i32 = 0;
-            while batch < 8 {
+            while batch < 256 {
                 let n = ffi::pty_read(pty_buf);
                 if n > 0 {
                     parser::feed_slice(par, scr, cfg.palette, pty_buf[..n]);

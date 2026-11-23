@@ -638,6 +638,11 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
     }
 }
 
+extern fn cells_write_ascii(cells: screen::Cell[:], row_base: i64, cx: i32,
+                            data: const u8[:], data_pos: i64, max_count: i32,
+                            fg: u32, bg: u32, attrs: u32,
+                            ul_style: u32, ul_color: u32, link_id: u32) -> i32 = "goosy_cells_write_ascii";
+
 fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const u8[:]) {
     var i: i64 = 0;
     let n = data.len;
@@ -645,31 +650,72 @@ fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const
         // Fast-path: chunk consecutive printable ASCII characters in ST_GROUND
         if p.state == ST_GROUND && p.utf8_dec.expected == 0 && !s.wrap_pending && s.view_offset == 0 {
             let row_base = (s.cy as i64) * s.cols;
-            var template_cell = screen::Cell {
-                cp: 0x20, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
-                attrs: s.cur_attrs, width: 1, flags: 0,
-                ul_style: s.cur_ul_style, ul_color: s.cur_ul_color, link_id: s.cur_link_id,
-            };
-            var mark_dirty = false;
-            while i < n && s.cx < s.cols {
-                let b = data[i];
-                if b < 0x20 || b >= 0x7F { break; }
-                template_cell.cp = b;
-                s.cells[row_base + s.cx] = template_cell;
-                mark_dirty = true;
-                i += 1;
-                if s.cx + 1 >= s.cols {
-                    s.cx = s.cols - 1;
-                    if s.autowrap { s.wrap_pending = true; }
-                    break;
-                } else {
-                    s.cx += 1;
+            let avail = s.cols - s.cx;
+            if avail > 0 {
+                let k = cells_write_ascii(s.cells[..], row_base, s.cx, data, i, avail,
+                                          s.cur_fg, s.cur_bg, s.cur_attrs,
+                                          s.cur_ul_style, s.cur_ul_color, s.cur_link_id);
+                if k > 0 {
+                    i += k;
+                    if s.cx + k >= s.cols {
+                        s.cx = s.cols - 1;
+                        if s.autowrap { s.wrap_pending = true; }
+                    } else {
+                        s.cx += k;
+                    }
+                    if s.cy < s.dirty_rows.len { s.dirty_rows[s.cy] = 2; }
+                    continue;
                 }
             }
-            if mark_dirty {
-                screen::mark_row_dirty(s, s.cy);
+        }
+
+        // Fast-path: SGR ANSI sequence \033[...m in ST_GROUND
+        if p.state == ST_GROUND && p.utf8_dec.expected == 0 && data[i] == 0x1B && i + 2 < n && data[i + 1] == '[' {
+            var k = i + 2;
+            var is_sgr = false;
+            while k < n && k < i + 32 {
+                let c = data[k];
+                if c == 'm' {
+                    is_sgr = true;
+                    break;
+                }
+                if !((c >= '0' && c <= '9') || c == ';' || c == ':') {
+                    break;
+                }
+                k += 1;
             }
-            if i >= n { break; }
+            if is_sgr {
+                p.param_count = 0;
+                var cur_val: i32 = 0;
+                var has_v = false;
+                var next_sub = false;
+                var idx = i + 2;
+                while idx < k {
+                    let c = data[idx];
+                    if c >= '0' && c <= '9' {
+                        has_v = true;
+                        cur_val = cur_val * 10 + (c - '0');
+                    } else if c == ';' || c == ':' {
+                        if p.param_count < MAX_PARAMS {
+                            p.params[p.param_count] = cur_val;
+                            p.is_subparam[p.param_count] = next_sub;
+                            p.param_count += 1;
+                        }
+                        cur_val = 0;
+                        has_v = false;
+                        next_sub = (c == ':');
+                    }
+                    idx += 1;
+                }
+                if has_v && p.param_count < MAX_PARAMS {
+                    p.params[p.param_count] = cur_val;
+                    p.is_subparam[p.param_count] = next_sub;
+                    p.param_count += 1;
+                }
+                apply_sgr(p, s, pal);
+                i = k + 1;
+                continue;
+            }
         }
 
         // Fast-path for CRLF (\r\n) and LF (\n) in ST_GROUND
@@ -685,7 +731,7 @@ fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const
                 } else {
                     s.wrap_pending = false;
                     s.cx = 0;
-                    screen::mark_row_dirty(s, s.cy);
+                    if s.cy < s.dirty_rows.len { s.dirty_rows[s.cy] = 2; }
                     i += 1;
                     continue;
                 }
