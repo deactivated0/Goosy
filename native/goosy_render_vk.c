@@ -47,20 +47,22 @@ static VkDevice         g_vk_device         = VK_NULL_HANDLE;
 static VkQueue          g_vk_queue          = VK_NULL_HANDLE;
 static uint32_t         g_vk_queue_family   = 0;
 
+#define MAX_VK_IMAGES 16
+
 static VkSwapchainKHR   g_vk_swapchain      = VK_NULL_HANDLE;
 static VkFormat         g_vk_format         = VK_FORMAT_B8G8R8A8_UNORM;
 static VkExtent2D       g_vk_extent         = { 800, 600 };
 static uint32_t         g_vk_image_count    = 0;
-static VkImage          g_vk_images[4];
-static VkImageView      g_vk_views[4];
-static VkFramebuffer    g_vk_framebuffers[4];
+static VkImage          g_vk_images[MAX_VK_IMAGES];
+static VkImageView      g_vk_views[MAX_VK_IMAGES];
+static VkFramebuffer    g_vk_framebuffers[MAX_VK_IMAGES];
 
 static VkRenderPass     g_vk_render_pass    = VK_NULL_HANDLE;
 static VkPipelineLayout g_vk_pipe_layout    = VK_NULL_HANDLE;
 static VkPipeline       g_vk_pipeline       = VK_NULL_HANDLE;
 
 static VkCommandPool    g_vk_cmd_pool       = VK_NULL_HANDLE;
-static VkCommandBuffer  g_vk_cmd_bufs[4];
+static VkCommandBuffer  g_vk_cmd_bufs[MAX_VK_IMAGES];
 static VkSemaphore      g_vk_sem_available  = VK_NULL_HANDLE;
 static VkSemaphore      g_vk_sem_rendered   = VK_NULL_HANDLE;
 static VkFence          g_vk_fence          = VK_NULL_HANDLE;
@@ -129,8 +131,12 @@ static bool create_swapchain_and_views(void) {
     g_vk_extent.height = (uint32_t)(g_cur_h * g_cur_scale);
 
     uint32_t desired_images = caps.minImageCount + 1;
+    if (desired_images < caps.minImageCount) desired_images = caps.minImageCount;
     if (caps.maxImageCount > 0 && desired_images > caps.maxImageCount) {
         desired_images = caps.maxImageCount;
+    }
+    if (desired_images > MAX_VK_IMAGES) {
+        desired_images = MAX_VK_IMAGES;
     }
 
     VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
@@ -169,8 +175,12 @@ static bool create_swapchain_and_views(void) {
         return false;
     }
 
-    vkGetSwapchainImagesKHR(g_vk_device, g_vk_swapchain, &g_vk_image_count, NULL);
-    if (g_vk_image_count > 4) g_vk_image_count = 4;
+    uint32_t actual_images = 0;
+    vkGetSwapchainImagesKHR(g_vk_device, g_vk_swapchain, &actual_images, NULL);
+    if (actual_images > MAX_VK_IMAGES) {
+        actual_images = MAX_VK_IMAGES;
+    }
+    g_vk_image_count = actual_images;
     vkGetSwapchainImagesKHR(g_vk_device, g_vk_swapchain, &g_vk_image_count, g_vk_images);
 
     for (uint32_t i = 0; i < g_vk_image_count; i++) {
@@ -624,7 +634,7 @@ static bool vk_init(void) {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = g_vk_cmd_pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = g_vk_image_count
+        .commandBufferCount = MAX_VK_IMAGES
     };
     vkAllocateCommandBuffers(g_vk_device, &cbai, g_vk_cmd_bufs);
 
@@ -1040,6 +1050,9 @@ static int32_t vk_begin(uint32_t bg_rgb) {
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
         return -1;
     }
+    if (g_active_image_idx >= g_vk_image_count) {
+        return -1;
+    }
 
     g_quad_count = 0;
     (void)bg_rgb;
@@ -1049,8 +1062,10 @@ static int32_t vk_begin(uint32_t bg_rgb) {
 static void vk_end(bool request_frame_cb) {
     (void)request_frame_cb;
     if (!g_vk_device || !g_vk_swapchain) return;
+    if (g_active_image_idx >= g_vk_image_count) return;
 
     VkCommandBuffer cb = g_vk_cmd_bufs[g_active_image_idx];
+    if (!cb) return;
     vkResetCommandBuffer(cb, 0);
 
     VkCommandBufferBeginInfo cbbi = {
