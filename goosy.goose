@@ -568,7 +568,11 @@ fn main() {
                                     screen::mark_all_dirty(scr);
                                 } else {
                                     // Client mouse tracking active (agy, codex, etc.):
-                                    // Forward press to client, but arm drag-selection detector
+                                    // If there was an active text selection, dismiss it on click!
+                                    if scr.sel_active {
+                                        scr.sel_active = false;
+                                        screen::mark_all_dirty(scr);
+                                    }
                                     mouse_tracking_press = true;
                                     mouse_press_c = c;
                                     mouse_press_r = r;
@@ -598,6 +602,10 @@ fn main() {
                                 mouse_tracking_press = false;
                                 input::encode_mouse(mouse_out, scr, 0, c, r, false);
                                 if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
+                                if scr.sel_active {
+                                    scr.sel_active = false;
+                                    screen::mark_all_dirty(scr);
+                                }
                             } else if scr.mouse_mode != 0 && !shift {
                                 input::encode_mouse(mouse_out, scr, 0, c, r, false);
                                 if mouse_out.len > 0 { ffi::pty_write(mouse_out); }

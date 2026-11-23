@@ -17,18 +17,18 @@ fi
 
 mkdir -p "$BIN_DIR" "$APP_DIR" "$MAN_DIR" "$CFG_DIR"
 install -m 755 "$ROOT_DIR/build/goosy" "$BIN_DIR/goosy"
-ln -sf goosy "$BIN_DIR/goot"
+rm -f "$BIN_DIR/goot"
 
 if command -v sudo >/dev/null 2>&1; then
     sudo ln -sf "$BIN_DIR/goosy" /usr/local/bin/goosy 2>/dev/null || true
-    sudo ln -sf "$BIN_DIR/goot" /usr/local/bin/goot 2>/dev/null || true
+    sudo rm -f /usr/local/bin/goot 2>/dev/null || true
     sudo ln -sf "$BIN_DIR/goosy" /usr/bin/goosy 2>/dev/null || true
-    sudo ln -sf "$BIN_DIR/goot" /usr/bin/goot 2>/dev/null || true
+    sudo rm -f /usr/bin/goot 2>/dev/null || true
 fi
 
 if [ -f "$ROOT_DIR/doc/goosy.ini.5" ]; then
     install -m 644 "$ROOT_DIR/doc/goosy.ini.5" "$MAN_DIR/goosy.ini.5"
-    ln -sf goosy.ini.5 "$MAN_DIR/goot.ini.5"
+    rm -f "$MAN_DIR/goot.ini.5"
 fi
 
 if [ ! -f "$CFG_DIR/goosy.ini" ]; then
@@ -53,7 +53,7 @@ if [ -n "$ICON_SRC" ]; then
     ICON_BASE="$PREFIX/share/icons/hicolor"
     mkdir -p "$PREFIX/share/pixmaps"
     install -m 644 "$ICON_SRC" "$PREFIX/share/pixmaps/goosy.png"
-    ln -sf goosy.png "$PREFIX/share/pixmaps/goot.png"
+    rm -f "$PREFIX/share/pixmaps/goot.png"
     for sz in 16 24 32 48 64 128 256 512; do
         mkdir -p "$ICON_BASE/${sz}x${sz}/apps"
         if command -v magick >/dev/null 2>&1 && magick "$ICON_SRC" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goosy.png" 2>/dev/null; then
@@ -63,7 +63,7 @@ if [ -n "$ICON_SRC" ]; then
         else
             install -m 644 "$ICON_SRC" "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
         fi
-        ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goot.png"
+        rm -f "$ICON_BASE/${sz}x${sz}/apps/goot.png"
     done
 fi
 
@@ -80,7 +80,7 @@ Categories=System;TerminalEmulator;
 StartupNotify=false
 EOF
 
-ln -sf goosy.desktop "$APP_DIR/goot.desktop"
+rm -f "$APP_DIR/goot.desktop"
 
-echo "[goosy] Installed to $BIN_DIR/goosy (with $BIN_DIR/goot symlink) and $MAN_DIR/goosy.ini.5"
+echo "[goosy] Installed to $BIN_DIR/goosy and $MAN_DIR/goosy.ini.5"
 echo "[goosy] Run 'man goosy.ini' to view configuration and shortcut documentation."

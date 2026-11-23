@@ -121,8 +121,13 @@ extern fn render_images(pad_px: i32, title_h: i32, view_top_abs_row: i32,
                         rows: i32, cols: i32, cell_w: i32, cell_h: i32) = "goosy_render_images";
 extern fn render_end(request_frame_cb: bool) = "goosy_render_end";
 extern fn renderer_init(pref_type: i32) -> i32 = "goosy_renderer_init";
+extern fn renderer_get_active_type() -> i32 = "goosy_renderer_get_active_type";
 extern fn renderer_resize(width_px: i32, height_px: i32, scale: i32) = "goosy_renderer_resize";
 extern fn renderer_close() = "goosy_render_close";
+
+let RENDERER_VULKAN: i32 = 1;
+let RENDERER_OPENGL: i32 = 2;
+let RENDERER_PIXMAN: i32 = 3;
 
 // Sixel & Kitty Graphics Protocols
 extern fn sixel_decode(data: const u8[:], col: i32, abs_row: i32, cell_w: i32, cell_h: i32) -> i32 = "goosy_sixel_decode";

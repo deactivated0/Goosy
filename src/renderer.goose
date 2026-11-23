@@ -175,8 +175,9 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
     let is_csd = cfg.title_bar && (ffi::wl_is_csd() != 0);
     let title_h = if is_csd { cfg.title_bar_height * scale } else { 0 };
 
-    let is_full = s.full_redraw_frames > 0;
-    var any_dirty = is_full || s.title_dirty || (m.kind != modes::MODE_NORMAL);
+    let is_gpu = ffi::renderer_get_active_type() != ffi::RENDERER_PIXMAN;
+    let is_full = is_gpu || (s.full_redraw_frames > 0);
+    var any_dirty = (s.full_redraw_frames > 0) || s.title_dirty || (m.kind != modes::MODE_NORMAL);
     if !any_dirty {
         for r in 0..s.rows {
             if r < s.dirty_rows.len && s.dirty_rows[r] > 0 {

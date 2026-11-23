@@ -348,10 +348,20 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
         for r in 0..s.rows {
             if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
         }
+        if s.sel_active {
+            s.sel_y0 -= count;
+            s.sel_y1 -= count;
+            if s.sel_y0 < 0 && s.sel_y1 < 0 {
+                s.sel_active = false;
+            }
+        }
         return;
     }
 
     normalize_grid(s);
+    if s.sel_active {
+        s.sel_active = false;
+    }
     let ec = erase_cell(s);
     screen_scroll_up(s.cells[..], s.cols, top, bottom, count,
                      s.prompt_rows[..], s.wrapped_rows[..], s.dirty_rows[..],
@@ -376,10 +386,20 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
         for r in 0..s.rows {
             if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
         }
+        if s.sel_active {
+            s.sel_y0 += count;
+            s.sel_y1 += count;
+            if s.sel_y0 >= s.rows && s.sel_y1 >= s.rows {
+                s.sel_active = false;
+            }
+        }
         return;
     }
 
     normalize_grid(s);
+    if s.sel_active {
+        s.sel_active = false;
+    }
     let row_count = bottom - count + 1 - top;
     cells_scroll_down(s.cells[..], s.cols, top, bottom, count);
     var r = row_count - 1;

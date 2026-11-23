@@ -8,6 +8,7 @@
 
 #include "goosy_render.h"
 #include "goosy_image.h"
+#include "goosy_icon_data.h"
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -553,8 +554,15 @@ static void gl_cursor(int32_t cx_px, int32_t cy_px, int32_t cell_w, int32_t cell
 }
 
 static int32_t gl_title_icon(int32_t x, int32_t y, int32_t size_px) {
-    (void)x; (void)y; (void)size_px;
-    return 0; /* Title bar draws vector fallback prompt >_ */
+    int count = 0;
+    const goosy_icon_span_t *spans = goosy_get_icon_spans(size_px, &count);
+    if (!spans || count <= 0) return 0;
+    for (int i = 0; i < count; i++) {
+        gl_push_quad((float)(x + spans[i].x), (float)(y + spans[i].y),
+                     (float)spans[i].w, 1.0f,
+                     -1.0f, -1.0f, -1.0f, -1.0f, spans[i].argb);
+    }
+    return 1;
 }
 
 static void gl_images(int32_t pad_px, int32_t title_h, int32_t view_top_abs_row,

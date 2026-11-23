@@ -483,6 +483,8 @@ static void pixman_cursor(int32_t cx_px, int32_t cy_px, int32_t cell_w, int32_t 
     }
 }
 
+#include "goosy_icon_data.h"
+
 static pixman_image_t *g_title_icon = NULL;
 static int32_t         g_title_icon_w = 0;
 static int32_t         g_title_icon_h = 0;
@@ -491,15 +493,25 @@ static int32_t         g_cached_scaled_icon_size = 0;
 
 static void load_title_icon_once(void) {
     if (g_title_icon) return;
+    char user_icon1[512] = {0};
+    char user_icon2[512] = {0};
+    const char *home = getenv("HOME");
+    if (home) {
+        snprintf(user_icon1, sizeof(user_icon1), "%s/.local/share/icons/hicolor/48x48/apps/goosy.png", home);
+        snprintf(user_icon2, sizeof(user_icon2), "%s/.local/share/pixmaps/goosy.png", home);
+    }
     const char *icon_paths[] = {
+        user_icon1,
+        user_icon2,
+        "/usr/local/share/icons/hicolor/48x48/apps/goosy.png",
         "/usr/share/icons/hicolor/48x48/apps/goosy.png",
         "/usr/share/pixmaps/goosy.png",
         "assets/goosy.png",
         "../assets/goosy.png",
-        "assets/goot.png",
         NULL
     };
     for (int i = 0; icon_paths[i]; i++) {
+        if (!icon_paths[i][0]) continue;
         FILE *f = fopen(icon_paths[i], "rb");
         if (!f) continue;
         fseek(f, 0, SEEK_END);

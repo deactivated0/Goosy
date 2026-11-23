@@ -87,6 +87,5 @@ goose check goosy.goose
 
 echo "[goosy] Building native executable (goose build -O2)..."
 goose build -O2 -o build/goosy goosy.goose
-ln -sf goosy build/goot
 
-echo "[goosy] Build succeeded: $ROOT_DIR/build/goosy (and symlinked build/goot)"
+echo "[goosy] Build succeeded: $ROOT_DIR/build/goosy"
