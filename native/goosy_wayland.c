@@ -256,10 +256,21 @@ static void xdg_wm_base_ping(void *data, struct xdg_wm_base *wm_base, uint32_t s
 }
 static const struct xdg_wm_base_listener g_wm_base_listener = { .ping = xdg_wm_base_ping };
 
+void goosy_wl_update_opaque_region(int32_t width, int32_t height) {
+    if (!g_compositor || !g_surface || width <= 0 || height <= 0) return;
+    struct wl_region *region = wl_compositor_create_region(g_compositor);
+    if (region) {
+        wl_region_add(region, 0, 0, width, height);
+        wl_surface_set_opaque_region(g_surface, region);
+        wl_region_destroy(region);
+    }
+}
+
 static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial) {
     (void)data;
     xdg_surface_ack_configure(xdg_surface, serial);
     g_configured = true;
+    goosy_wl_update_opaque_region(g_width, g_height);
     push_ev3(GOOSY_EV_CONFIGURE, g_width, g_height, g_scale);
 }
 static const struct xdg_surface_listener g_xdg_surface_listener = { .configure = xdg_surface_configure };
@@ -717,6 +728,7 @@ int32_t goosy_wl_init(goosy_const_bytes_t title, goosy_const_bytes_t app_id,
         g_viewport = wp_viewporter_get_viewport(g_viewporter, g_surface);
     }
 
+    goosy_wl_update_opaque_region(g_width, g_height);
     wl_surface_commit(g_surface);
     wl_display_roundtrip(g_display);
     return 0;

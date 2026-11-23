@@ -200,6 +200,7 @@ int32_t goosy_wl_primary_set(goosy_const_bytes_t text);
 int32_t goosy_wl_primary_request(void);
 int64_t goosy_wl_primary_read(goosy_bytes_t out_buf);
 void    goosy_wl_close(void);
+void    goosy_wl_update_opaque_region(int32_t width, int32_t height);
 
 /* Internal bridge hooks between Wayland, XKB, and Renderer */
 struct goosy_shm_buffer {
