@@ -187,6 +187,10 @@ fn main() {
     var ptr_x: i32    = 0;
     var ptr_y: i32    = 0;
 
+    var mouse_tracking_press = false;
+    var mouse_press_c: i32   = 0;
+    var mouse_press_r: i32   = 0;
+
     var hover_btn: i32           = renderer::BTN_NONE;
     var pressed_btn: i32         = renderer::BTN_NONE;
     var last_title_click_ns: i64 = 0;
@@ -360,7 +364,7 @@ fn main() {
                         }
                     } else {
                         if scr.view_offset > 0 { scr.view_offset = 0; screen::mark_all_dirty(scr); }
-                        input::translate_key(key_out, sym, mods, key_utf8[..ulen], scr.app_cursor);
+                        input::translate_key(key_out, sym, mods, key_utf8[..ulen], scr.app_cursor, scr.kitty_keyboard_flags);
                         if key_out.len > 0 { ffi::pty_write(key_out); }
                     }
                 }
@@ -416,6 +420,21 @@ fn main() {
                         scr.sel_x1 = c; scr.sel_y1 = r;
                     }
                     screen::mark_all_dirty(scr);
+                } else if mouse_tracking_press {
+                    let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
+                                          ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
+                    if c != mouse_press_c || r != mouse_press_r {
+                        // User dragged across cells: release synthetic press on client app & begin local selection!
+                        input::encode_mouse(mouse_out, scr, 0, mouse_press_c, mouse_press_r, false);
+                        if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
+                        mouse_tracking_press = false;
+                        drag_left = true;
+                        scr.sel_active = true;
+                        scr.sel_mode = screen::SEL_CHAR;
+                        scr.sel_x0 = mouse_press_c; scr.sel_y0 = mouse_press_r;
+                        scr.sel_x1 = c; scr.sel_y1 = r;
+                        screen::mark_all_dirty(scr);
+                    }
                 } else if drag_right {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
                                           ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
@@ -501,12 +520,7 @@ fn main() {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
                                           ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
 
-                    // Client mouse tracking active unless Shift overrides for local selection
-                    if scr.mouse_mode != 0 && !shift {
-                        let mbtn: i32 = if btn == 272 { 0 } else if btn == 274 { 1 } else { 2 };
-                        input::encode_mouse(mouse_out, scr, mbtn, c, r, pressed);
-                        if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
-                    } else if btn == 272 { // Left click
+                    if btn == 272 { // Left click
                         if pressed {
                             let cell = screen::visible_cell(scr, c, r);
                             if ctrl && cell.link_id > 0 {
@@ -514,9 +528,6 @@ fn main() {
                                 if screen::get_hyperlink(scr, cell.link_id, link_url) && link_url.len > 0 {
                                     let _ = ffi::open_url(link_url);
                                 }
-                            } else if shift && scr.sel_active {
-                                drag_left = true;
-                                screen::extend_selection(scr, c, r, ctrl);
                             } else {
                                 let now = ffi::time_monotonic_ns();
                                 if now - last_click_ns < 400000000 && c == last_click_c && r == last_click_r {
@@ -527,40 +538,83 @@ fn main() {
                                 }
                                 last_click_ns = now; last_click_c = c; last_click_r = r;
 
-                                drag_left = true;
-                                if click_count == 1 {
-                                    scr.sel_active = true;
-                                    scr.sel_mode = if ctrl { screen::SEL_BLOCK } else { screen::SEL_CHAR };
-                                    scr.sel_x0 = c; scr.sel_y0 = r;
-                                    scr.sel_x1 = c; scr.sel_y1 = r;
-                                    screen::mark_all_dirty(scr);
-                                } else if click_count == 2 {
-                                    screen::select_word(scr, c, r, ctrl);
-                                } else if click_count == 3 {
-                                    screen::select_quote_or_line(scr, c, r);
-                                } else if click_count == 4 {
-                                    screen::select_line(scr, r);
-                                }
-                            }
-                        } else {
-                            drag_left = false;
-                            if scr.sel_active {
-                                if click_count == 1 && scr.sel_x0 == scr.sel_x1 && scr.sel_y0 == scr.sel_y1 && !shift {
-                                    scr.sel_active = false;
-                                    screen::mark_all_dirty(scr);
-                                } else {
+                                if click_count >= 2 {
+                                    // Multi-click selection (word/line) overrides client mouse tracking
+                                    if mouse_tracking_press {
+                                        input::encode_mouse(mouse_out, scr, 0, mouse_press_c, mouse_press_r, false);
+                                        if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
+                                        mouse_tracking_press = false;
+                                    }
+                                    drag_left = true;
+                                    if click_count == 2 {
+                                        screen::select_word(scr, c, r, ctrl);
+                                    } else if click_count == 3 {
+                                        screen::select_quote_or_line(scr, c, r);
+                                    } else if click_count == 4 {
+                                        screen::select_line(scr, r);
+                                    }
                                     screen::extract_selection(scr, sel_out);
                                     if sel_out.len > 0 {
                                         ffi::wl_primary_set(sel_out);
                                         ffi::wl_clipboard_set(sel_out);
                                     }
+                                } else if shift || scr.mouse_mode == 0 {
+                                    mouse_tracking_press = false;
+                                    drag_left = true;
+                                    scr.sel_active = true;
+                                    scr.sel_mode = if ctrl { screen::SEL_BLOCK } else { screen::SEL_CHAR };
+                                    scr.sel_x0 = c; scr.sel_y0 = r;
+                                    scr.sel_x1 = c; scr.sel_y1 = r;
+                                    screen::mark_all_dirty(scr);
+                                } else {
+                                    // Client mouse tracking active (agy, codex, etc.):
+                                    // Forward press to client, but arm drag-selection detector
+                                    mouse_tracking_press = true;
+                                    mouse_press_c = c;
+                                    mouse_press_r = r;
+                                    input::encode_mouse(mouse_out, scr, 0, c, r, true);
+                                    if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
                                 }
                             }
+                        } else {
+                            // Button released
+                            if drag_left {
+                                drag_left = false;
+                                mouse_tracking_press = false;
+                                if scr.sel_active {
+                                    if click_count == 1 && scr.sel_x0 == scr.sel_x1 && scr.sel_y0 == scr.sel_y1 && !shift {
+                                        scr.sel_active = false;
+                                        screen::mark_all_dirty(scr);
+                                    } else {
+                                        screen::extract_selection(scr, sel_out);
+                                        if sel_out.len > 0 {
+                                            ffi::wl_primary_set(sel_out);
+                                            ffi::wl_clipboard_set(sel_out);
+                                        }
+                                    }
+                                }
+                            } else if mouse_tracking_press {
+                                // User clicked in-place without dragging: deliver clean release to client
+                                mouse_tracking_press = false;
+                                input::encode_mouse(mouse_out, scr, 0, c, r, false);
+                                if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
+                            } else if scr.mouse_mode != 0 && !shift {
+                                input::encode_mouse(mouse_out, scr, 0, c, r, false);
+                                if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
+                            }
                         }
-                    } else if btn == 274 { // Middle click: paste from primary selection
-                        if pressed { ffi::wl_primary_request(); }
-                    } else if btn == 273 { // Right click: extend selection (+ Ctrl forces char-wise)
-                        if pressed {
+                    } else if btn == 274 { // Middle click: paste from primary selection or forward to client
+                        if scr.mouse_mode != 0 && !shift {
+                            input::encode_mouse(mouse_out, scr, 1, c, r, pressed);
+                            if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
+                        } else if pressed {
+                            ffi::wl_primary_request();
+                        }
+                    } else if btn == 273 { // Right click
+                        if scr.mouse_mode != 0 && !shift {
+                            input::encode_mouse(mouse_out, scr, 2, c, r, pressed);
+                            if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
+                        } else if pressed {
                             drag_right = true;
                             right_force_c = ctrl;
                             screen::extend_selection(scr, c, r, ctrl);

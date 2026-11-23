@@ -337,6 +337,31 @@ fn test_kitty_keyboard_protocol() {
     parser::feed_slice(par, scr, pal, "\x1b[?u");
     assert(scr.reply_buf.len == 5);
     assert(scr.reply_buf[3] == '3');
+
+    // Test key translation in standard mode (flags == 0)
+    var key_out: u8[>..] = [];
+    input::translate_key(key_out, input::XKB_Return, 0, [], false, 0);
+    assert(key_out.len == 1 && key_out[0] == 0x0D);
+    input::translate_key(key_out, input::XKB_KP_Enter, 0, [], false, 0);
+    assert(key_out.len == 1 && key_out[0] == 0x0D);
+    input::translate_key(key_out, input::XKB_Up, 0, [], false, 0);
+    assert(key_out.len == 3 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == 'A');
+    input::translate_key(key_out, input::XKB_ISO_Left_Tab, 0, [], false, 0);
+    assert(key_out.len == 3 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == 'Z');
+
+    // Test key translation in Kitty Keyboard mode (flags & 1 != 0)
+    input::translate_key(key_out, input::XKB_Return, 0, [], false, 1);
+    assert(key_out.len == 5 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '3' && key_out[4] == 'u');
+    input::translate_key(key_out, input::XKB_KP_Enter, 0, [], false, 1);
+    assert(key_out.len == 5 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '3' && key_out[4] == 'u');
+    input::translate_key(key_out, input::XKB_Escape, 0, [], false, 1);
+    assert(key_out.len == 5 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '2' && key_out[3] == '7' && key_out[4] == 'u');
+    input::translate_key(key_out, input::XKB_Tab, 0, [], false, 1);
+    assert(key_out.len == 4 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '9' && key_out[3] == 'u');
+    input::translate_key(key_out, input::XKB_BackSpace, 0, [], false, 1);
+    assert(key_out.len == 6 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '2' && key_out[4] == '7' && key_out[5] == 'u');
+    input::translate_key(key_out, input::XKB_Up, 0, [], true, 1);
+    assert(key_out.len == 3 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == 'A');
 }
 
 fn test_command_output_selection_and_combining() {

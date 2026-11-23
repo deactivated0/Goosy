@@ -28,7 +28,7 @@ fi
 
 if [ -f "$ROOT_DIR/doc/goosy.ini.5" ]; then
     install -m 644 "$ROOT_DIR/doc/goosy.ini.5" "$MAN_DIR/goosy.ini.5"
-    ln -sf goosy.ini.5 "$MAN_DIR/goosy.ini.5"
+    ln -sf goosy.ini.5 "$MAN_DIR/goot.ini.5"
 fi
 
 if [ ! -f "$CFG_DIR/goosy.ini" ]; then
@@ -47,27 +47,23 @@ fi
 ICON_SRC=""
 if [ -f "$ROOT_DIR/assets/goosy.png" ]; then
     ICON_SRC="$ROOT_DIR/assets/goosy.png"
-elif [ -f "$ROOT_DIR/assets/goosy.png" ]; then
-    ICON_SRC="$ROOT_DIR/assets/goosy.png"
 fi
 
 if [ -n "$ICON_SRC" ]; then
     ICON_BASE="$PREFIX/share/icons/hicolor"
     mkdir -p "$PREFIX/share/pixmaps"
     install -m 644 "$ICON_SRC" "$PREFIX/share/pixmaps/goosy.png"
-    ln -sf goosy.png "$PREFIX/share/pixmaps/goosy.png"
+    ln -sf goosy.png "$PREFIX/share/pixmaps/goot.png"
     for sz in 16 24 32 48 64 128 256 512; do
         mkdir -p "$ICON_BASE/${sz}x${sz}/apps"
-        if command -v magick >/dev/null 2>&1; then
-            magick "$ICON_SRC" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
-            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
-        elif command -v convert >/dev/null 2>&1; then
-            convert "$ICON_SRC" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
-            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
+        if command -v magick >/dev/null 2>&1 && magick "$ICON_SRC" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goosy.png" 2>/dev/null; then
+            :
+        elif command -v convert >/dev/null 2>&1 && convert "$ICON_SRC" -resize "${sz}x${sz}" "$ICON_BASE/${sz}x${sz}/apps/goosy.png" 2>/dev/null; then
+            :
         else
             install -m 644 "$ICON_SRC" "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
-            ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goosy.png"
         fi
+        ln -sf goosy.png "$ICON_BASE/${sz}x${sz}/apps/goot.png"
     done
 fi
 
@@ -84,7 +80,7 @@ Categories=System;TerminalEmulator;
 StartupNotify=false
 EOF
 
-ln -sf goosy.desktop "$APP_DIR/goosy.desktop"
+ln -sf goosy.desktop "$APP_DIR/goot.desktop"
 
 echo "[goosy] Installed to $BIN_DIR/goosy (with $BIN_DIR/goot symlink) and $MAN_DIR/goosy.ini.5"
 echo "[goosy] Run 'man goosy.ini' to view configuration and shortcut documentation."

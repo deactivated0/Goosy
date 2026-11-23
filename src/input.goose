@@ -6,34 +6,54 @@ import src.ffi;
 import src.screen;
 
 // Common XKB keysyms (xkbcommon-keysyms.h)
-let XKB_BackSpace: i32 = 0xFF08;
-let XKB_Tab: i32       = 0xFF09;
-let XKB_Return: i32    = 0xFF0D;
-let XKB_Escape: i32    = 0xFF1B;
-let XKB_Delete: i32    = 0xFFFF;
-let XKB_Home: i32      = 0xFF50;
-let XKB_Left: i32      = 0xFF51;
-let XKB_Up: i32        = 0xFF52;
-let XKB_Right: i32     = 0xFF53;
-let XKB_Down: i32      = 0xFF54;
-let XKB_Page_Up: i32   = 0xFF55;
-let XKB_Page_Down: i32 = 0xFF56;
-let XKB_End: i32       = 0xFF57;
-let XKB_Insert: i32    = 0xFF63;
-let XKB_F1: i32        = 0xFFBE;
-let XKB_F2: i32        = 0xFFBF;
-let XKB_F3: i32        = 0xFFC0;
-let XKB_F4: i32        = 0xFFC1;
-let XKB_F5: i32        = 0xFFC2;
-let XKB_F6: i32        = 0xFFC3;
-let XKB_F7: i32        = 0xFFC4;
-let XKB_F8: i32        = 0xFFC5;
-let XKB_F9: i32        = 0xFFC6;
-let XKB_F10: i32       = 0xFFC7;
-let XKB_F11: i32       = 0xFFC8;
-let XKB_F12: i32       = 0xFFC9;
-let XKB_XF86Copy: i32  = 0x1008FF57;
-let XKB_XF86Paste: i32 = 0x1008FF6D;
+let XKB_BackSpace: i32    = 0xFF08;
+let XKB_Tab: i32          = 0xFF09;
+let XKB_Return: i32       = 0xFF0D;
+let XKB_Escape: i32       = 0xFF1B;
+let XKB_Delete: i32       = 0xFFFF;
+let XKB_Home: i32         = 0xFF50;
+let XKB_Left: i32         = 0xFF51;
+let XKB_Up: i32           = 0xFF52;
+let XKB_Right: i32        = 0xFF53;
+let XKB_Down: i32         = 0xFF54;
+let XKB_Page_Up: i32      = 0xFF55;
+let XKB_Page_Down: i32    = 0xFF56;
+let XKB_End: i32          = 0xFF57;
+let XKB_Insert: i32       = 0xFF63;
+let XKB_KP_Enter: i32     = 0xFF8D;
+let XKB_KP_Home: i32      = 0xFF95;
+let XKB_KP_Left: i32      = 0xFF96;
+let XKB_KP_Up: i32        = 0xFF97;
+let XKB_KP_Right: i32     = 0xFF98;
+let XKB_KP_Down: i32      = 0xFF99;
+let XKB_KP_Page_Up: i32   = 0xFF9A;
+let XKB_KP_Page_Down: i32 = 0xFF9B;
+let XKB_KP_End: i32       = 0xFF9C;
+let XKB_KP_Insert: i32    = 0xFF9E;
+let XKB_KP_Delete: i32    = 0xFF9F;
+let XKB_KP_Multiply: i32  = 0xFFAA;
+let XKB_KP_Add: i32       = 0xFFAB;
+let XKB_KP_Separator: i32 = 0xFFAC;
+let XKB_KP_Subtract: i32  = 0xFFAD;
+let XKB_KP_Decimal: i32   = 0xFFAE;
+let XKB_KP_Divide: i32    = 0xFFAF;
+let XKB_KP_0: i32         = 0xFFB0;
+let XKB_KP_9: i32         = 0xFFB9;
+let XKB_ISO_Left_Tab: i32 = 0xFE20;
+let XKB_F1: i32           = 0xFFBE;
+let XKB_F2: i32           = 0xFFBF;
+let XKB_F3: i32           = 0xFFC0;
+let XKB_F4: i32           = 0xFFC1;
+let XKB_F5: i32           = 0xFFC2;
+let XKB_F6: i32           = 0xFFC3;
+let XKB_F7: i32           = 0xFFC4;
+let XKB_F8: i32           = 0xFFC5;
+let XKB_F9: i32           = 0xFFC6;
+let XKB_F10: i32          = 0xFFC7;
+let XKB_F11: i32          = 0xFFC8;
+let XKB_F12: i32          = 0xFFC9;
+let XKB_XF86Copy: i32     = 0x1008FF57;
+let XKB_XF86Paste: i32    = 0x1008FF6D;
 
 // Normal-mode actions
 let ACT_NONE: i32           = 0;
@@ -95,13 +115,13 @@ fn xterm_mod_param(mods: i32) -> i32 {
     return m;
 }
 
-fn push_csi_arrow(out: u8[>..]&, letter: u8, mods: i32, app_cursor: bool) {
+fn push_csi_arrow(out: u8[>..]&, letter: u8, mods: i32, app_cursor: bool, kitty_flags: i32) {
     let mp = xterm_mod_param(mods);
     if mp > 1 {
         out.append("\x1b[1;");
         out.push(('0' + mp) as! u8);
         out.push(letter);
-    } else if app_cursor {
+    } else if app_cursor && (kitty_flags & 1) == 0 {
         out.append("\x1bO");
         out.push(letter);
     } else {
@@ -121,31 +141,88 @@ fn push_tilde_key(out: u8[>..]&, num: const u8[:], mods: i32) {
     out.push('~');
 }
 
-fn translate_key(out: u8[>..]&, keysym: i32, mods: i32, utf8_bytes: const u8[:], app_cursor: bool) {
+fn translate_key(out: u8[>..]&, keysym: i32, mods: i32, utf8_bytes: const u8[:], app_cursor: bool, kitty_flags: i32) {
     out.clear();
     let ctrl  = (mods & ffi::MOD_CTRL) != 0;
     let shift = (mods & ffi::MOD_SHIFT) != 0;
     let alt   = (mods & ffi::MOD_ALT) != 0;
 
+    // Kitty Keyboard Protocol disambiguation (flag 1: DISAMBIGUATE_ESCAPE_CODES)
+    if (kitty_flags & 1) != 0 {
+        if keysym == XKB_Return || keysym == XKB_KP_Enter {
+            let mp = xterm_mod_param(mods);
+            out.append("\x1b[13");
+            if mp > 1 { out.push(';'); out.push(('0' + mp) as! u8); }
+            out.push('u');
+            return;
+        }
+        if keysym == XKB_Escape {
+            let mp = xterm_mod_param(mods);
+            out.append("\x1b[27");
+            if mp > 1 { out.push(';'); out.push(('0' + mp) as! u8); }
+            out.push('u');
+            return;
+        }
+        if keysym == XKB_Tab {
+            let mp = xterm_mod_param(mods);
+            out.append("\x1b[9");
+            if mp > 1 { out.push(';'); out.push(('0' + mp) as! u8); }
+            out.push('u');
+            return;
+        }
+        if keysym == XKB_ISO_Left_Tab {
+            let mp = xterm_mod_param(mods | ffi::MOD_SHIFT);
+            out.append("\x1b[9;");
+            out.push(('0' + mp) as! u8);
+            out.push('u');
+            return;
+        }
+        if keysym == XKB_BackSpace {
+            let mp = xterm_mod_param(mods);
+            out.append("\x1b[127");
+            if mp > 1 { out.push(';'); out.push(('0' + mp) as! u8); }
+            out.push('u');
+            return;
+        }
+    }
+
     match keysym {
         XKB_Return => { if alt { out.push(0x1B); } out.push(0x0D); return; },
+        XKB_KP_Enter => { if alt { out.push(0x1B); } out.push(0x0D); return; },
         XKB_BackSpace => { if alt { out.push(0x1B); } out.push(if ctrl { 0x08 } else { 0x7F }); return; },
         XKB_Tab => {
             if shift { out.append("\x1b[Z"); }
             else { out.push(0x09); }
             return;
         },
+        XKB_ISO_Left_Tab => { out.append("\x1b[Z"); return; },
         XKB_Escape => { out.push(0x1B); return; },
-        XKB_Up    => { push_csi_arrow(out, 'A', mods, app_cursor); return; },
-        XKB_Down  => { push_csi_arrow(out, 'B', mods, app_cursor); return; },
-        XKB_Right => { push_csi_arrow(out, 'C', mods, app_cursor); return; },
-        XKB_Left  => { push_csi_arrow(out, 'D', mods, app_cursor); return; },
-        XKB_Home  => { push_csi_arrow(out, 'H', mods, app_cursor); return; },
-        XKB_End   => { push_csi_arrow(out, 'F', mods, app_cursor); return; },
+        XKB_Up        => { push_csi_arrow(out, 'A', mods, app_cursor, kitty_flags); return; },
+        XKB_KP_Up     => { push_csi_arrow(out, 'A', mods, app_cursor, kitty_flags); return; },
+        XKB_Down      => { push_csi_arrow(out, 'B', mods, app_cursor, kitty_flags); return; },
+        XKB_KP_Down   => { push_csi_arrow(out, 'B', mods, app_cursor, kitty_flags); return; },
+        XKB_Right     => { push_csi_arrow(out, 'C', mods, app_cursor, kitty_flags); return; },
+        XKB_KP_Right  => { push_csi_arrow(out, 'C', mods, app_cursor, kitty_flags); return; },
+        XKB_Left      => { push_csi_arrow(out, 'D', mods, app_cursor, kitty_flags); return; },
+        XKB_KP_Left   => { push_csi_arrow(out, 'D', mods, app_cursor, kitty_flags); return; },
+        XKB_Home      => { push_csi_arrow(out, 'H', mods, app_cursor, kitty_flags); return; },
+        XKB_KP_Home   => { push_csi_arrow(out, 'H', mods, app_cursor, kitty_flags); return; },
+        XKB_End       => { push_csi_arrow(out, 'F', mods, app_cursor, kitty_flags); return; },
+        XKB_KP_End     => { push_csi_arrow(out, 'F', mods, app_cursor, kitty_flags); return; },
         XKB_Insert    => { push_tilde_key(out, "2", mods); return; },
+        XKB_KP_Insert => { push_tilde_key(out, "2", mods); return; },
         XKB_Delete    => { push_tilde_key(out, "3", mods); return; },
+        XKB_KP_Delete => { push_tilde_key(out, "3", mods); return; },
         XKB_Page_Up   => { push_tilde_key(out, "5", mods); return; },
+        XKB_KP_Page_Up => { push_tilde_key(out, "5", mods); return; },
         XKB_Page_Down => { push_tilde_key(out, "6", mods); return; },
+        XKB_KP_Page_Down => { push_tilde_key(out, "6", mods); return; },
+        XKB_KP_Add       => { if alt { out.push(0x1B); } out.push('+'); return; },
+        XKB_KP_Subtract  => { if alt { out.push(0x1B); } out.push('-'); return; },
+        XKB_KP_Multiply  => { if alt { out.push(0x1B); } out.push('*'); return; },
+        XKB_KP_Divide    => { if alt { out.push(0x1B); } out.push('/'); return; },
+        XKB_KP_Separator => { if alt { out.push(0x1B); } out.push(','); return; },
+        XKB_KP_Decimal   => { if alt { out.push(0x1B); } out.push('.'); return; },
         XKB_F1  => { out.append("\x1bOP"); return; },
         XKB_F2  => { out.append("\x1bOQ"); return; },
         XKB_F3  => { out.append("\x1bOR"); return; },
@@ -159,6 +236,12 @@ fn translate_key(out: u8[>..]&, keysym: i32, mods: i32, utf8_bytes: const u8[:],
         XKB_F11 => { push_tilde_key(out, "23", mods); return; },
         XKB_F12 => { push_tilde_key(out, "24", mods); return; },
         _ => {},
+    }
+
+    if keysym >= XKB_KP_0 && keysym <= XKB_KP_9 {
+        if alt { out.push(0x1B); }
+        out.push(('0' + (keysym - XKB_KP_0)) as! u8);
+        return;
     }
 
     if ctrl {
