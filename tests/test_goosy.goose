@@ -350,18 +350,43 @@ fn test_kitty_keyboard_protocol() {
     assert(key_out.len == 3 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == 'Z');
 
     // Test key translation in Kitty Keyboard mode (flags & 1 != 0)
+    // Unmodified keys MUST NOT emit \x1b[...u to prevent typing literal 'u' in shells and REPLs
     input::translate_key(key_out, input::XKB_Return, 0, [], false, 1);
-    assert(key_out.len == 5 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '3' && key_out[4] == 'u');
+    assert(key_out.len == 1 && key_out[0] == 0x0D);
     input::translate_key(key_out, input::XKB_KP_Enter, 0, [], false, 1);
-    assert(key_out.len == 5 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '3' && key_out[4] == 'u');
+    assert(key_out.len == 1 && key_out[0] == 0x0D);
     input::translate_key(key_out, input::XKB_Escape, 0, [], false, 1);
-    assert(key_out.len == 5 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '2' && key_out[3] == '7' && key_out[4] == 'u');
+    assert(key_out.len == 1 && key_out[0] == 0x1B);
     input::translate_key(key_out, input::XKB_Tab, 0, [], false, 1);
-    assert(key_out.len == 4 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '9' && key_out[3] == 'u');
+    assert(key_out.len == 1 && key_out[0] == 0x09);
     input::translate_key(key_out, input::XKB_BackSpace, 0, [], false, 1);
-    assert(key_out.len == 6 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '2' && key_out[4] == '7' && key_out[5] == 'u');
+    assert(key_out.len == 1 && key_out[0] == 0x7F);
+
+    // Modified keys under Kitty Keyboard disambiguation mode (flags & 1 != 0) emit CSI ... u
+    input::translate_key(key_out, input::XKB_Return, ffi::MOD_SHIFT, [], false, 1);
+    assert(key_out.len == 7 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '3' && key_out[4] == ';' && key_out[5] == '2' && key_out[6] == 'u');
+    input::translate_key(key_out, input::XKB_Return, ffi::MOD_CTRL, [], false, 1);
+    assert(key_out.len == 7 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '3' && key_out[4] == ';' && key_out[5] == '5' && key_out[6] == 'u');
+    input::translate_key(key_out, input::XKB_Tab, ffi::MOD_SHIFT, [], false, 1);
+    assert(key_out.len == 6 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '9' && key_out[3] == ';' && key_out[4] == '2' && key_out[5] == 'u');
+    input::translate_key(key_out, input::XKB_BackSpace, ffi::MOD_CTRL, [], false, 1);
+    assert(key_out.len == 8 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == '1' && key_out[3] == '2' && key_out[4] == '7' && key_out[5] == ';' && key_out[6] == '5' && key_out[7] == 'u');
     input::translate_key(key_out, input::XKB_Up, 0, [], true, 1);
     assert(key_out.len == 3 && key_out[0] == 0x1B && key_out[1] == '[' && key_out[2] == 'A');
+
+    // Test Kitty Keyboard push, pop, clear mode (mode 3), and DECSTR reset
+    parser::feed_slice(par, scr, pal, "\x1b[>1u"); // push 1
+    assert(scr.kitty_keyboard_flags == 1);
+    assert(scr.kitty_keyboard_stack.len == 1);
+    parser::feed_slice(par, scr, pal, "\x1b[<1u"); // pop 1
+    assert(scr.kitty_keyboard_flags == 3);
+    assert(scr.kitty_keyboard_stack.len == 0);
+    parser::feed_slice(par, scr, pal, "\x1b[=3;3u"); // clear flags 3
+    assert(scr.kitty_keyboard_flags == 0);
+    parser::feed_slice(par, scr, pal, "\x1b[=1u"); // set flag 1
+    assert(scr.kitty_keyboard_flags == 1);
+    parser::feed_slice(par, scr, pal, "\x1b[!p"); // DECSTR soft reset
+    assert(scr.kitty_keyboard_flags == 0);
 }
 
 fn test_command_output_selection_and_combining() {

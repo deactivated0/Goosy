@@ -80,6 +80,7 @@ root struct Screen {
     mouse_mode: i32 = 0,
     mouse_sgr: bool = false,
     kitty_keyboard_flags: i32 = 0,
+    kitty_keyboard_stack: i32[..16] = [],
 
     full_redraw_frames: i32 = 2,
     title_dirty: bool = false,
@@ -151,6 +152,24 @@ extern fn cells_copy(dst: Cell[:], dst_offset: i64, src: Cell[:], src_offset: i6
 extern fn cells_fill(cells: Cell[:], start_idx: i64, count: i64, fg: u32, bg: u32) = "goosy_cells_fill";
 extern fn cells_normalize_grid(cells: Cell[:], cols: i32, rows: i32, offset: i32,
                                prompt_rows: u8[:], wrapped_rows: u8[:]) = "goosy_cells_normalize_grid";
+
+fn push_kitty_keyboard(s: Screen&, flags: i32) {
+    if s.kitty_keyboard_stack.len < 16 {
+        s.kitty_keyboard_stack.push(s.kitty_keyboard_flags);
+    }
+    s.kitty_keyboard_flags = flags;
+}
+
+fn pop_kitty_keyboard(s: Screen&, count: i32) {
+    var n = if count <= 0 { 1 } else { count };
+    while n > 0 && s.kitty_keyboard_stack.len > 0 {
+        s.kitty_keyboard_flags = s.kitty_keyboard_stack.pop();
+        n -= 1;
+    }
+    if s.kitty_keyboard_stack.len == 0 && n > 0 {
+        s.kitty_keyboard_flags = 0;
+    }
+}
 
 fn phys_row(s: Screen&, r: i32) -> i32 {
     if s.rows <= 0 { return 0; }
@@ -230,6 +249,8 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     s.origin_mode = false;
     s.mouse_mode = 0;
     s.mouse_sgr = false;
+    s.kitty_keyboard_flags = 0;
+    s.kitty_keyboard_stack.clear();
 
     let total = (c as i64) * r;
     let b = blank_cell(s);
@@ -655,6 +676,8 @@ fn leave_alt_screen(s: Screen&, restore_cursor: bool) {
     s.alt_screen = false;
     s.mouse_mode = 0;
     s.mouse_sgr = false;
+    s.kitty_keyboard_flags = 0;
+    s.kitty_keyboard_stack.clear();
     s.scroll_top = 0; s.scroll_bottom = s.rows - 1;
     if restore_cursor { s.cx = s.alt_saved_cx; s.cy = s.alt_saved_cy; clamp_cursor(s); }
     mark_all_dirty(s);

@@ -235,7 +235,8 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
             return;
         }
         if final_b == 'u' {
-            s.kitty_keyboard_flags = param_or(p, 0, 0);
+            let flags = param_or(p, 0, 0);
+            screen::push_kitty_keyboard(s, flags);
             return;
         }
         return;
@@ -243,19 +244,39 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
 
     if p.private_prefix == '=' {
         if final_b == 'u' {
-            s.kitty_keyboard_flags = param_or(p, 0, 0);
+            let flags = param_or(p, 0, 0);
+            let mode = if p.param_count >= 2 { p.params[1] } else { 1 };
+            if mode == 1 {
+                s.kitty_keyboard_flags = flags;
+            } else if mode == 2 {
+                s.kitty_keyboard_flags |= flags;
+            } else if mode == 3 {
+                s.kitty_keyboard_flags &= ~flags;
+            }
             return;
         }
     }
 
     if p.private_prefix == '<' {
         if final_b == 'u' {
-            s.kitty_keyboard_flags = param_or(p, 0, 0);
+            let count = if p.param_count > 0 { p.params[0] } else { 1 };
+            screen::pop_kitty_keyboard(s, count);
             return;
         }
     }
 
     if p.private_prefix != 0 {
+        return;
+    }
+
+    if p.intermediate == '!' && final_b == 'p' {
+        // DECSTR — Soft Terminal Reset
+        s.kitty_keyboard_flags = 0;
+        s.kitty_keyboard_stack.clear();
+        s.mouse_mode = 0;
+        s.mouse_sgr = false;
+        s.cursor_style = 0;
+        s.bracketed_paste = false;
         return;
     }
 

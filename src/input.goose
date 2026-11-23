@@ -148,27 +148,37 @@ fn translate_key(out: u8[>..]&, keysym: i32, mods: i32, utf8_bytes: const u8[:],
     let alt   = (mods & ffi::MOD_ALT) != 0;
 
     // Kitty Keyboard Protocol disambiguation (flag 1: DISAMBIGUATE_ESCAPE_CODES)
+    // Only keys with modifiers (mp > 1) emit CSI ... u sequences.
+    // Unmodified keys (Enter, Tab, Escape, Backspace) MUST emit their standard
+    // ASCII control codes (0x0D, 0x09, 0x1B, 0x7F) so they never leak raw 'u' characters
+    // into shells, REPLs, or TUIs.
     if (kitty_flags & 1) != 0 {
         if keysym == XKB_Return || keysym == XKB_KP_Enter {
             let mp = xterm_mod_param(mods);
-            out.append("\x1b[13");
-            if mp > 1 { out.push(';'); out.push(('0' + mp) as! u8); }
-            out.push('u');
-            return;
+            if mp > 1 {
+                out.append("\x1b[13;");
+                out.push(('0' + mp) as! u8);
+                out.push('u');
+                return;
+            }
         }
         if keysym == XKB_Escape {
             let mp = xterm_mod_param(mods);
-            out.append("\x1b[27");
-            if mp > 1 { out.push(';'); out.push(('0' + mp) as! u8); }
-            out.push('u');
-            return;
+            if mp > 1 {
+                out.append("\x1b[27;");
+                out.push(('0' + mp) as! u8);
+                out.push('u');
+                return;
+            }
         }
         if keysym == XKB_Tab {
             let mp = xterm_mod_param(mods);
-            out.append("\x1b[9");
-            if mp > 1 { out.push(';'); out.push(('0' + mp) as! u8); }
-            out.push('u');
-            return;
+            if mp > 1 {
+                out.append("\x1b[9;");
+                out.push(('0' + mp) as! u8);
+                out.push('u');
+                return;
+            }
         }
         if keysym == XKB_ISO_Left_Tab {
             let mp = xterm_mod_param(mods | ffi::MOD_SHIFT);
@@ -179,10 +189,12 @@ fn translate_key(out: u8[>..]&, keysym: i32, mods: i32, utf8_bytes: const u8[:],
         }
         if keysym == XKB_BackSpace {
             let mp = xterm_mod_param(mods);
-            out.append("\x1b[127");
-            if mp > 1 { out.push(';'); out.push(('0' + mp) as! u8); }
-            out.push('u');
-            return;
+            if mp > 1 {
+                out.append("\x1b[127;");
+                out.push(('0' + mp) as! u8);
+                out.push('u');
+                return;
+            }
         }
     }
 
