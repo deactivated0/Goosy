@@ -1219,6 +1219,11 @@ int64_t goosy_stream_fast(goosy_cells_slice_t cells, int32_t cols, int32_t rows,
             while (i < n && cx < cols) {
                 uint8_t ch = src[i];
                 if (ch < 0x20 || ch >= 0x7F) break;
+                if (cur_row_cells[cx].flags & 1) {
+                    if (cx > 0) cur_row_cells[cx - 1] = blank;
+                } else if (cur_row_cells[cx].width == 2) {
+                    if (cx + 1 < cols) cur_row_cells[cx + 1] = blank;
+                }
                 tmpl.cp = (uint32_t)ch;
                 cur_row_cells[cx++] = tmpl;
                 i++;

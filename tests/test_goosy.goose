@@ -294,6 +294,59 @@ fn test_agy_escape_sequences_and_state() {
     assert(c_comp.bg == 0xF6912E);
 }
 
+fn test_rendering_glitches_and_unicode_width() {
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 80, 24, pal.fg, pal.bg, 20, 0);
+    var par = parser::Parser { .. };
+
+    // 1. Emoji / Symbol cell widths matching agy / Bubble Tea
+    assert(utf8::cell_width(0x2728) == 2); // ✨
+    assert(utf8::cell_width(0x26A1) == 2); // ⚡
+    assert(utf8::cell_width(0x23F3) == 2); // ⏳
+    assert(utf8::cell_width(0x2705) == 2); // ✅
+    assert(utf8::cell_width(0x274C) == 2); // ❌
+    assert(utf8::cell_width(0x2B50) == 2); // ⭐
+
+    // 2. Cursor save/restore (ESC 7 / ESC 8) preserves SGR attributes and colors
+    scr.cur_fg = 0x112233;
+    scr.cur_bg = 0x445566;
+    scr.cur_attrs = screen::ATTR_BOLD;
+    parser::feed_slice(par, scr, pal, "\x1b7\x1b[38;2;255;0;0;48;2;0;255;0;1mTest\x1b8");
+    assert(scr.cur_fg == 0x112233);
+    assert(scr.cur_bg == 0x445566);
+    assert(scr.cur_attrs == screen::ATTR_BOLD);
+
+    // 3. Wide character boundary integrity
+    // Writing 2-column emoji ✨ takes col 0 and 1
+    parser::feed_slice(par, scr, pal, "\x1b[1;1H\xE2\x9C\xA8AB");
+    assert(screen::visible_cell(scr, 0, 0).width == 2);
+    assert(screen::visible_cell(scr, 1, 0).flags == screen::CELL_WIDE_CONT);
+    assert(screen::visible_cell(scr, 2, 0).cp == 'A');
+    assert(screen::visible_cell(scr, 3, 0).cp == 'B');
+
+    // Overwriting col 0 with 1-width 'X' must clear continuation cell at col 1
+    parser::feed_slice(par, scr, pal, "\x1b[1;1HX");
+    let c0 = screen::visible_cell(scr, 0, 0);
+    let c1 = screen::visible_cell(scr, 1, 0);
+    assert(c0.cp == 'X' && c0.width == 1 && c0.flags == 0);
+    assert(c1.cp == ' ' && c1.flags == 0);
+
+    // Overwriting continuation cell (col 1) must clear left half at col 0
+    parser::feed_slice(par, scr, pal, "\x1b[1;1H\xE2\x9C\xA8");
+    parser::feed_slice(par, scr, pal, "\x1b[1;2HY");
+    let c0_b = screen::visible_cell(scr, 0, 0);
+    let c1_b = screen::visible_cell(scr, 1, 0);
+    assert(c0_b.cp == ' ' && c0_b.width == 1);
+    assert(c1_b.cp == 'Y' && c1_b.width == 1);
+
+    // 4. Origin mode (DECOM) positioning and clamping
+    parser::feed_slice(par, scr, pal, "\x1b[5;15r\x1b[?6h\x1b[1;1H");
+    assert(scr.cy == 4); // Line 1 in origin mode maps to row 4 (0-based)
+    screen::clamp_cursor(scr);
+    assert(scr.cy == 4);
+}
+
 fn test_crlf_paste_and_resize_preservation() {
     var out: u8[>..] = [];
     input::format_paste(out, "hello\r\nworld\nfoo\rbar", false);
@@ -423,6 +476,7 @@ fn main() {
     test_fastfetch_alignment_and_box_drawing();
     test_underlines_hyperlinks_and_reflow();
     test_agy_escape_sequences_and_state();
+    test_rendering_glitches_and_unicode_width();
     test_crlf_paste_and_resize_preservation();
     test_kitty_keyboard_protocol();
     test_command_output_selection_and_combining();

@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_GL_QUADS 32768
+#define MAX_GL_QUADS 131072
 #define GL_ATLAS_SIZE 1024
 
 typedef struct {
@@ -195,10 +195,10 @@ static bool gl_init(void) {
     glBufferData(GL_ARRAY_BUFFER, sizeof(gl_vertex_t) * MAX_GL_QUADS * 4, NULL, GL_DYNAMIC_DRAW);
 
     /* Build Static Index Buffer for Quads */
-    GLushort *indices = (GLushort *)malloc(sizeof(GLushort) * MAX_GL_QUADS * 6);
+    GLuint *indices = (GLuint *)malloc(sizeof(GLuint) * MAX_GL_QUADS * 6);
     if (indices) {
         for (int32_t i = 0; i < MAX_GL_QUADS; i++) {
-            GLushort base = (GLushort)(i * 4);
+            GLuint base = (GLuint)(i * 4);
             indices[i * 6 + 0] = base + 0;
             indices[i * 6 + 1] = base + 1;
             indices[i * 6 + 2] = base + 2;
@@ -208,7 +208,7 @@ static bool gl_init(void) {
         }
         glGenBuffers(1, &g_ebo);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLushort) * MAX_GL_QUADS * 6, indices, GL_STATIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLuint) * MAX_GL_QUADS * 6, indices, GL_STATIC_DRAW);
         free(indices);
     }
 
@@ -616,7 +616,7 @@ static void gl_end(bool request_frame_cb) {
         glVertexAttribPointer((GLuint)g_loc_tex, 2, GL_FLOAT, GL_FALSE, sizeof(gl_vertex_t), (const void *)offsetof(gl_vertex_t, u));
         glVertexAttribPointer((GLuint)g_loc_col, 4, GL_FLOAT, GL_FALSE, sizeof(gl_vertex_t), (const void *)offsetof(gl_vertex_t, r));
 
-        glDrawElements(GL_TRIANGLES, g_quad_count * 6, GL_UNSIGNED_SHORT, 0);
+        glDrawElements(GL_TRIANGLES, g_quad_count * 6, GL_UNSIGNED_INT, 0);
 
         glDisableVertexAttribArray((GLuint)g_loc_pos);
         glDisableVertexAttribArray((GLuint)g_loc_tex);

@@ -17,8 +17,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_VK_QUADS 32768
+#define MAX_VK_QUADS 131072
 #define VK_ATLAS_SIZE 1024
+
+static uint32_t g_vk_bg_rgb = 0;
 
 typedef struct {
     float x, y;
@@ -523,7 +525,7 @@ static bool vk_init(void) {
     vkMapMemory(g_vk_device, g_vk_vbo_mem, 0, vbo_size, 0, (void **)&g_vk_mapped_vbo);
 
     /* Allocate Static Index Buffer */
-    VkDeviceSize ebo_size = sizeof(uint16_t) * MAX_VK_QUADS * 6;
+    VkDeviceSize ebo_size = sizeof(uint32_t) * MAX_VK_QUADS * 6;
     bci.size = ebo_size;
     bci.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     vkCreateBuffer(g_vk_device, &bci, NULL, &g_vk_ebo);
@@ -533,11 +535,11 @@ static bool vk_init(void) {
     vkAllocateMemory(g_vk_device, &mai, NULL, &g_vk_ebo_mem);
     vkBindBufferMemory(g_vk_device, g_vk_ebo, g_vk_ebo_mem, 0);
 
-    uint16_t *indices = NULL;
+    uint32_t *indices = NULL;
     vkMapMemory(g_vk_device, g_vk_ebo_mem, 0, ebo_size, 0, (void **)&indices);
     if (indices) {
-        for (uint16_t i = 0; i < MAX_VK_QUADS; i++) {
-            uint16_t base = (uint16_t)(i * 4);
+        for (uint32_t i = 0; i < MAX_VK_QUADS; i++) {
+            uint32_t base = i * 4;
             indices[i * 6 + 0] = base + 0;
             indices[i * 6 + 1] = base + 1;
             indices[i * 6 + 2] = base + 2;
@@ -1072,7 +1074,7 @@ static int32_t vk_begin(uint32_t bg_rgb) {
     }
 
     g_quad_count = 0;
-    (void)bg_rgb;
+    g_vk_bg_rgb = bg_rgb;
     return 0;
 }
 
@@ -1091,7 +1093,10 @@ static void vk_end(bool request_frame_cb) {
     };
     vkBeginCommandBuffer(cb, &cbbi);
 
-    VkClearValue cv = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } } };
+    float clr_r = ((g_vk_bg_rgb >> 16) & 0xFF) / 255.0f;
+    float clr_g = ((g_vk_bg_rgb >> 8)  & 0xFF) / 255.0f;
+    float clr_b = (g_vk_bg_rgb & 0xFF)         / 255.0f;
+    VkClearValue cv = { .color = { .float32 = { clr_r, clr_g, clr_b, 1.0f } } };
     VkRenderPassBeginInfo rpbi = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = g_vk_render_pass,
@@ -1112,7 +1117,7 @@ static void vk_end(bool request_frame_cb) {
 
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(cb, 0, 1, &g_vk_vbo, &offset);
-        vkCmdBindIndexBuffer(cb, g_vk_ebo, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(cb, g_vk_ebo, 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdDrawIndexed(cb, (uint32_t)(g_quad_count * 6), 1, 0, 0, 0);
     }

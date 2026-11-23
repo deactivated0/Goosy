@@ -330,8 +330,8 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
                 screen::set_cursor(s, 0, if s.origin_mode { top } else { 0 });
             }
         },
-        's' => { s.saved_cx = s.cx; s.saved_cy = s.cy; },
-        'u' => { screen::set_cursor(s, s.saved_cx, s.saved_cy); },
+        's' => { screen::save_cursor(s); },
+        'u' => { screen::restore_cursor(s); },
         'n' => {
             if p.param_count > 0 && p.params[0] == 6 {
                 s.reply_buf.append("\x1b[");
@@ -518,8 +518,8 @@ fn feed_byte(p: Parser&, s: screen::Screen&, pal: colors::Palette&, b: u8) {
             'P' => { p.dcs_buf.clear(); p.esc_seen = false; p.state = ST_DCS_DATA; },
             '_' => { p.apc_buf.clear(); p.esc_seen = false; p.state = ST_APC_DATA; },
             '^' => { p.state = ST_DCS_IGNORE; },
-            '7' => { s.saved_cx = s.cx; s.saved_cy = s.cy; p.state = ST_GROUND; },
-            '8' => { screen::set_cursor(s, s.saved_cx, s.saved_cy); p.state = ST_GROUND; },
+            '7' => { screen::save_cursor(s); p.state = ST_GROUND; },
+            '8' => { screen::restore_cursor(s); p.state = ST_GROUND; },
             'D' => { screen::linefeed(s); p.state = ST_GROUND; },
             'E' => { s.cx = 0; screen::linefeed(s); p.state = ST_GROUND; },
             'M' => { screen::reverse_index(s); p.state = ST_GROUND; },

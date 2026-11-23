@@ -54,8 +54,23 @@ root struct Screen {
     cy: i32 = 0,
     saved_cx: i32 = 0,
     saved_cy: i32 = 0,
+    saved_fg: u32 = 0xEAEAEA,
+    saved_bg: u32 = 0x000000,
+    saved_attrs: u16 = 0,
+    saved_ul_style: u8 = 0,
+    saved_ul_color: u32 = 0,
+    saved_autowrap: bool = true,
+    saved_origin_mode: bool = false,
+
     alt_saved_cx: i32 = 0,
     alt_saved_cy: i32 = 0,
+    alt_saved_fg: u32 = 0xEAEAEA,
+    alt_saved_bg: u32 = 0x000000,
+    alt_saved_attrs: u16 = 0,
+    alt_saved_ul_style: u8 = 0,
+    alt_saved_ul_color: u32 = 0,
+    alt_saved_autowrap: bool = true,
+    alt_saved_origin_mode: bool = false,
     wrap_pending: bool = false,
 
     scroll_top: i32 = 0,
@@ -234,7 +249,15 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     let c = if cols < 2 { 2 } else if cols > MAX_COLS { MAX_COLS } else { cols };
     let r = if rows < 2 { 2 } else if rows > MAX_ROWS { MAX_ROWS } else { rows };
     s.cols = c; s.rows = r;
-    s.cx = 0; s.cy = 0; s.saved_cx = 0; s.saved_cy = 0;
+    s.cx = 0; s.cy = 0;
+    s.saved_cx = 0; s.saved_cy = 0;
+    s.saved_fg = fg; s.saved_bg = bg; s.saved_attrs = 0;
+    s.saved_ul_style = 0; s.saved_ul_color = 0;
+    s.saved_autowrap = true; s.saved_origin_mode = false;
+    s.alt_saved_cx = 0; s.alt_saved_cy = 0;
+    s.alt_saved_fg = fg; s.alt_saved_bg = bg; s.alt_saved_attrs = 0;
+    s.alt_saved_ul_style = 0; s.alt_saved_ul_color = 0;
+    s.alt_saved_autowrap = true; s.alt_saved_origin_mode = false;
     s.wrap_pending = false;
     s.scroll_top = 0; s.scroll_bottom = r - 1;
     s.default_fg = fg; s.default_bg = bg;
@@ -293,8 +316,58 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
 fn clamp_cursor(s: Screen&) {
     if s.cx < 0 { s.cx = 0; }
     if s.cx >= s.cols { s.cx = s.cols - 1; }
-    if s.cy < 0 { s.cy = 0; }
-    if s.cy >= s.rows { s.cy = s.rows - 1; }
+    let min_y = if s.origin_mode { s.scroll_top } else { 0 };
+    let max_y = if s.origin_mode { s.scroll_bottom } else { s.rows - 1 };
+    if s.cy < min_y { s.cy = min_y; }
+    if s.cy > max_y { s.cy = max_y; }
+}
+
+fn save_cursor(s: Screen&) {
+    s.saved_cx = s.cx;
+    s.saved_cy = s.cy;
+    s.saved_fg = s.cur_fg;
+    s.saved_bg = s.cur_bg;
+    s.saved_attrs = s.cur_attrs;
+    s.saved_ul_style = s.cur_ul_style;
+    s.saved_ul_color = s.cur_ul_color;
+    s.saved_autowrap = s.autowrap;
+    s.saved_origin_mode = s.origin_mode;
+}
+
+fn restore_cursor(s: Screen&) {
+    s.cx = s.saved_cx;
+    s.cy = s.saved_cy;
+    s.cur_fg = s.saved_fg;
+    s.cur_bg = s.saved_bg;
+    s.cur_attrs = s.saved_attrs;
+    s.cur_ul_style = s.saved_ul_style;
+    s.cur_ul_color = s.saved_ul_color;
+    s.autowrap = s.saved_autowrap;
+    s.origin_mode = s.saved_origin_mode;
+    s.wrap_pending = false;
+    clamp_cursor(s);
+}
+
+fn clean_wide_boundary(s: Screen&, base: i64, col: i32) {
+    if col < 0 || col >= s.cols { return; }
+    let idx = base + col;
+    if idx < 0 || idx >= s.cells.len { return; }
+    let cell = s.cells[idx];
+    if cell.flags == CELL_WIDE_CONT {
+        if col > 0 {
+            let left_idx = base + (col - 1);
+            if left_idx >= 0 && left_idx < s.cells.len {
+                s.cells[left_idx] = erase_cell(s);
+            }
+        }
+    } else if cell.width == 2 {
+        if col + 1 < s.cols {
+            let right_idx = base + (col + 1);
+            if right_idx >= 0 && right_idx < s.cells.len {
+                s.cells[right_idx] = erase_cell(s);
+            }
+        }
+    }
 }
 
 fn set_cursor(s: Screen&, x: i32, y: i32) {
@@ -366,6 +439,7 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
             if pr < s.prompt_rows.len { s.prompt_rows[pr] = 0; }
             if pr < s.wrapped_rows.len { s.wrapped_rows[pr] = 0; }
         }
+        s.full_redraw_frames = 2;
         for r in 0..s.rows {
             if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
         }
@@ -383,6 +457,7 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
     if s.sel_active {
         s.sel_active = false;
     }
+    s.full_redraw_frames = 2;
     let ec = erase_cell(s);
     screen_scroll_up(s.cells[..], s.cols, top, bottom, count,
                      s.prompt_rows[..], s.wrapped_rows[..], s.dirty_rows[..],
@@ -404,6 +479,7 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
             if pr < s.prompt_rows.len { s.prompt_rows[pr] = 0; }
             if pr < s.wrapped_rows.len { s.wrapped_rows[pr] = 0; }
         }
+        s.full_redraw_frames = 2;
         for r in 0..s.rows {
             if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
         }
@@ -421,6 +497,7 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
     if s.sel_active {
         s.sel_active = false;
     }
+    s.full_redraw_frames = 2;
     let row_count = bottom - count + 1 - top;
     cells_scroll_down(s.cells[..], s.cols, top, bottom, count);
     var r = row_count - 1;
@@ -519,7 +596,12 @@ fn put_codepoint(s: Screen&, cp: u32) {
     }
 
     let pr = phys_row(s, s.cy);
-    let idx = (pr as i64) * s.cols + s.cx;
+    let base = (pr as i64) * s.cols;
+    clean_wide_boundary(s, base, s.cx);
+    if w == 2 {
+        clean_wide_boundary(s, base, s.cx + 1);
+    }
+    let idx = base + s.cx;
     s.cells[idx] = Cell {
         cp: cp, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
         attrs: s.cur_attrs, width: w as! u8, flags: 0,
@@ -550,6 +632,7 @@ fn erase_display(s: Screen&, mode: i32) {
     if mode == 0 {
         let cur_pr = phys_row(s, s.cy);
         let cur_base = (cur_pr as i64) * s.cols;
+        clean_wide_boundary(s, cur_base, s.cx);
         for c in s.cx..s.cols { s.cells[cur_base + c] = ec; }
         for r in (s.cy + 1)..s.rows {
             let pr = phys_row(s, r);
@@ -565,6 +648,7 @@ fn erase_display(s: Screen&, mode: i32) {
         }
         let cur_pr = phys_row(s, s.cy);
         let cur_base = (cur_pr as i64) * s.cols;
+        clean_wide_boundary(s, cur_base, s.cx);
         for c in 0..(s.cx + 1) { if c < s.cols { s.cells[cur_base + c] = ec; } }
         for r in 0..(s.cy + 1) { mark_row_dirty(s, r); }
     } else if mode == 2 || mode == 3 {
@@ -574,6 +658,7 @@ fn erase_display(s: Screen&, mode: i32) {
         if mode == 3 {
             s.sb_head = 0; s.sb_count = 0; s.view_offset = 0;
         }
+        s.full_redraw_frames = 2;
         mark_all_dirty(s);
     }
 }
@@ -583,8 +668,10 @@ fn erase_line(s: Screen&, mode: i32) {
     let ec = erase_cell(s);
     let base = (phys_row(s, s.cy) as i64) * s.cols;
     if mode == 0 {
+        clean_wide_boundary(s, base, s.cx);
         for c in s.cx..s.cols { s.cells[base + c] = ec; }
     } else if mode == 1 {
+        clean_wide_boundary(s, base, s.cx);
         for c in 0..(s.cx + 1) { s.cells[base + c] = ec; }
     } else if mode == 2 {
         for c in 0..s.cols { s.cells[base + c] = ec; }
@@ -604,6 +691,8 @@ fn insert_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
     let base = (phys_row(s, s.cy) as i64) * s.cols;
+    clean_wide_boundary(s, base, s.cx);
+    clean_wide_boundary(s, base, s.cols - 1);
     var c = s.cols - 1;
     while c >= s.cx + count {
         s.cells[base + c] = s.cells[base + (c - count)];
@@ -618,6 +707,8 @@ fn delete_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
     let base = (phys_row(s, s.cy) as i64) * s.cols;
+    clean_wide_boundary(s, base, s.cx);
+    clean_wide_boundary(s, base, s.cols - count);
     for c in s.cx..(s.cols - count) {
         s.cells[base + c] = s.cells[base + (c + count)];
     }
@@ -630,6 +721,8 @@ fn erase_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
     let base = (phys_row(s, s.cy) as i64) * s.cols;
+    clean_wide_boundary(s, base, s.cx);
+    clean_wide_boundary(s, base, s.cx + count - 1);
     let ec = erase_cell(s);
     for c in s.cx..(s.cx + count) { s.cells[base + c] = ec; }
     mark_row_dirty(s, s.cy);
@@ -657,7 +750,17 @@ fn swap_buffers(s: Screen&) {
 
 fn enter_alt_screen(s: Screen&, save_cursor: bool, clear_alt: bool) {
     if s.alt_screen { return; }
-    if save_cursor { s.alt_saved_cx = s.cx; s.alt_saved_cy = s.cy; }
+    if save_cursor {
+        s.alt_saved_cx = s.cx;
+        s.alt_saved_cy = s.cy;
+        s.alt_saved_fg = s.cur_fg;
+        s.alt_saved_bg = s.cur_bg;
+        s.alt_saved_attrs = s.cur_attrs;
+        s.alt_saved_ul_style = s.cur_ul_style;
+        s.alt_saved_ul_color = s.cur_ul_color;
+        s.alt_saved_autowrap = s.autowrap;
+        s.alt_saved_origin_mode = s.origin_mode;
+    }
     swap_buffers(s);
     s.alt_screen = true;
     s.view_offset = 0;
@@ -679,7 +782,19 @@ fn leave_alt_screen(s: Screen&, restore_cursor: bool) {
     s.kitty_keyboard_flags = 0;
     s.kitty_keyboard_stack.clear();
     s.scroll_top = 0; s.scroll_bottom = s.rows - 1;
-    if restore_cursor { s.cx = s.alt_saved_cx; s.cy = s.alt_saved_cy; clamp_cursor(s); }
+    if restore_cursor {
+        s.cx = s.alt_saved_cx;
+        s.cy = s.alt_saved_cy;
+        s.cur_fg = s.alt_saved_fg;
+        s.cur_bg = s.alt_saved_bg;
+        s.cur_attrs = s.alt_saved_attrs;
+        s.cur_ul_style = s.alt_saved_ul_style;
+        s.cur_ul_color = s.alt_saved_ul_color;
+        s.autowrap = s.alt_saved_autowrap;
+        s.origin_mode = s.alt_saved_origin_mode;
+        s.wrap_pending = false;
+        clamp_cursor(s);
+    }
     mark_all_dirty(s);
 }
 
