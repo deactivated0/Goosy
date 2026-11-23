@@ -162,8 +162,10 @@ void goosy_render_end(bool request_frame_cb) {
 }
 
 void goosy_render_close(void) {
+    if (!g_initialized) return;
     if (g_active_backend && g_active_backend->cleanup) {
         g_active_backend->cleanup();
     }
+    g_active_backend = NULL;
     g_initialized = false;
 }

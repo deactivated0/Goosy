@@ -27,6 +27,21 @@ typedef struct {
 } goosy_bytes_t;
 
 typedef struct {
+    uint32_t *data;
+    int64_t   len;
+} goosy_u32_slice_t;
+
+typedef struct {
+    int32_t *data;
+    int64_t  len;
+} goosy_i32_slice_t;
+
+typedef struct {
+    const uint32_t *data;
+    int64_t        len;
+} goosy_const_u32_slice_t;
+
+typedef struct {
     void   *data;
     int64_t len;
 } goosy_cells_slice_t;
@@ -55,10 +70,22 @@ void goosy_push_scrollback(goosy_cells_slice_t sb_cells, int32_t sb_cols, int32_
                            goosy_const_bytes_t prompt_rows, goosy_const_bytes_t wrapped_rows);
 void goosy_cells_copy(goosy_cells_slice_t dst, int64_t dst_offset, goosy_cells_slice_t src, int64_t src_offset, int64_t count);
 void goosy_cells_fill(goosy_cells_slice_t cells, int64_t start_idx, int64_t count, uint32_t fg, uint32_t bg);
+void goosy_cells_normalize_grid(goosy_cells_slice_t cells, int32_t cols, int32_t rows, int32_t offset,
+                                goosy_bytes_t prompt_rows, goosy_bytes_t wrapped_rows);
 int32_t goosy_cells_write_ascii(goosy_cells_slice_t cells, int64_t row_base, int32_t cx,
                                 goosy_const_bytes_t data, int64_t data_pos, int32_t max_count,
                                 uint32_t fg, uint32_t bg, uint32_t attrs,
                                 uint32_t ul_style, uint32_t ul_color, uint32_t link_id);
+int32_t goosy_fast_sgr(goosy_const_bytes_t data, int64_t pos,
+                       goosy_u32_slice_t out_state,
+                       goosy_const_u32_slice_t ansi_pal);
+int64_t goosy_stream_fast(goosy_cells_slice_t cells, int32_t cols, int32_t rows,
+                          goosy_i32_slice_t state,
+                          goosy_const_u32_slice_t ansi_pal,
+                          goosy_cells_slice_t sb_cells, int32_t sb_cols, int32_t sb_cap,
+                          goosy_bytes_t sb_prompt, goosy_bytes_t sb_wrapped,
+                          goosy_bytes_t prompt_rows, goosy_bytes_t wrapped_rows,
+                          goosy_const_bytes_t data, int64_t pos);
 
 /* -------------------------------------------------------------------------
  * Event types returned from native Wayland/input/PTY bridge to Goose

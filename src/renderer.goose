@@ -213,7 +213,8 @@ fn draw_frame(s: screen::Screen&, cfg: config::Config&, m: modes::ModeState&,
         if !row_dirty { continue; }
 
         let py = title_h + pad_px + row * cell_h;
-        let row_base = (row as i64) * s.cols;
+        let phys_r = if is_live { screen::phys_row(s, row) } else { 0 };
+        let row_base = (phys_r as i64) * s.cols;
         for col in 0..s.cols {
             let cell = if is_live { s.cells[row_base + col] } else { screen::visible_cell(s, col, row) };
             if cell.flags == screen::CELL_WIDE_CONT { continue; }

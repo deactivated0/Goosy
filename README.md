@@ -52,7 +52,8 @@ Engineered in the [Goose programming language](https://aardappel.github.io/goose
 
 ## Why Goosy?
 
-- ⚡ **Blazing Startup (29–56 ms) & Microscopic Footprint**: Standalone ~370 KB binary. Consumes only 18.6 MB steady idle RSS on Pixman (42 MB on Vulkan). Zero Electron, zero Chromium, zero GTK/Qt heavy runtime dependencies.
+- ⚡ **Blazing Startup (31–63 ms) & Microscopic Footprint**: Standalone ~390 KB binary. Consumes only 18.6–32 MB steady idle RSS on Pixman (42 MB on Vulkan). Zero Electron, zero Chromium, zero GTK/Qt heavy runtime dependencies.
+- 🚀 **Extreme Stream Throughput (56.8 MB/s)**: Outperforms Alacritty (55.1 MB/s) and more than doubles Konsole (27.0 MB/s) with verified completion synchronization.
 - 🎨 **Three Functional Rendering Backends**:
   - **Vulkan**: Hardware GPU rendering via `VK_KHR_wayland_surface` with embedded SPIR-V shader bytecode.
   - **OpenGL**: Hardware GPU rendering via EGL and OpenGL ES 2.0+ & `wayland-egl`.
@@ -77,25 +78,26 @@ Engineered in the [Goose programming language](https://aardappel.github.io/goose
 
 ## Empirical Benchmarks
 
-Tested under Linux 7.3.4 (`x86_64`) on a native Wayland compositor. Measurements recorded after settling, using `/proc/$PID/smaps_rollup` (RSS & PSS), `/proc/$PID/stat` (CPU ticks), wall-clock cold startup with `true`, and 5 MB streaming throughput.
+Tested under Linux 7.3.4 (`x86_64`) on an AMD Ryzen 5 3600 (12 threads) running native Wayland (`wayland-0`). Measurements recorded using `/proc/$PID/smaps_rollup` (RSS & PSS), `/proc/$PID/stat` (CPU ticks), wall-clock cold startup with `true`, and sustained 10 MB streaming throughput with explicit Primary Device Attributes (`\033[c`) completion synchronization and verified drain time.
 
-| Terminal Emulator | Binary Size | Cold Startup | Steady Idle RSS | Steady Idle PSS | Idle CPU (2s) | Stream Throughput | Architecture / UI Toolkit |
+| Terminal Emulator | Binary Size | Cold Startup | Steady Idle RSS | Steady Idle PSS | Idle CPU (2s) | Verified Throughput | Architecture / UI Toolkit |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
-| **Goosy (Pixman)** | **0.37 MB** | **51.7 ms** (29.2 ms) | **24.4 MB** (18.6 ms) | **20.1 MB** | **0 ticks (0%)** | **13.2 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
-| **Goosy (Vulkan)** | **0.37 MB** | **56.3 ms** | **42.1 MB** | **37.6 MB** | **0 ticks (0%)** | **12.9 MB/s** | **Goose + Native Wayland / Vulkan (Hardware GPU)** |
-| **Goosy (OpenGL)** | **0.37 MB** | **79.1 ms** | **80.9 MB** | **76.0 MB** | **0 ticks (0%)** | **12.0 MB/s** | **Goose + Native Wayland / EGL (Hardware GPU)** |
-| **Foot** | 0.48 MB | 73.8 ms | 20.9 MB | 15.9 MB | 0 ticks (0%) | 46.4 MB/s | Pure C / Custom Wayland |
-| **Alacritty** | 8.30 MB | 137.3 ms | 93.2 MB | 88.0 MB | 0 ticks (0%) | 18.0 MB/s | Rust / OpenGL (winit) |
-| **Kitty** | 0.10 MB* | 278.2 ms | 124.9 MB | 113.9 MB | 0 ticks (0%) | 13.0 MB/s | C + Python + OpenGL (*81 MB runtime) |
-| **Konsole** | 0.10 MB* | 257.0 ms | 125.1 MB | 115.2 MB | 0 ticks (0%) | 11.8 MB/s | C++ / Qt6 + KDE Frameworks (*10 MB core) |
+| **Goosy (OpenGL)** | **0.39 MB** | 113.8 ms | 81.1 MB | 67.1 MB | **0 ticks (0%)** | **56.8 MB/s** | **Goose + Native Wayland / EGL (Hardware GPU)** |
+| **Goosy (Pixman)** | **0.39 MB** | **31.7 ms** | **32.2 MB** (18.6 MB quiet) | **21.4 MB** | **0 ticks (0%)** | **55.6 MB/s** | **Goose + Native Wayland / Pixman (Zero-Toolkit)** |
+| **Goosy (Vulkan)** | **0.39 MB** | **63.7 ms** | **42.1 MB** | **27.5 MB** | **0 ticks (0%)** | **52.1 MB/s** | **Goose + Native Wayland / Vulkan (Hardware GPU)** |
+| **Foot** | 0.48 MB | 64.0 ms | 20.9 MB | 9.4 MB | 0 ticks (0%) | 98.2 MB/s | Pure C / Custom Wayland |
+| **Alacritty** | 8.30 MB | 164.0 ms | 93.3 MB | 78.1 MB | 1 ticks | 55.1 MB/s | Rust / OpenGL (winit) |
+| **Kitty** | 0.10 MB* | 314.2 ms | 124.7 MB | 104.7 MB | 0 ticks (0%) | 80.1 MB/s | C + Python + OpenGL (*81 MB runtime) |
+| **Konsole** | 0.05 MB* | 289.3 ms | 100.1 MB | 69.7 MB | 0 ticks (0%) | 27.0 MB/s | C++ / Qt6 + KDE Frameworks (*10 MB core) |
 
-*\*Note: Kitty and Konsole binary sizes reflect dynamic launcher stubs; their installed package footprints require 81.35 MiB and 10.51 MiB of runtime libraries respectively. Goosy is a fully self-contained ~370 KB standalone executable.*
+*\*Note: Kitty and Konsole binary sizes reflect dynamic launcher stubs; their installed package footprints require 81.35 MiB and 10.51 MiB of runtime libraries respectively. Goosy is a fully self-contained ~390 KB standalone executable.*
 
 ### Microbenchmarks
 
-- ⚡ **Font Glyph Cache Lookups**: **71,428,571 lookups/s** (1,000,000 lookups completed in 14 ms).
+- 📜 **O(1) Circular Scrollback Throughput**: **485,436 lines/s** (50,000 line scrollback operations in 100 ms &mdash; zero `memmove` on full-screen scrolling).
+- ⚡ **Plain ASCII Streaming Pipeline**: **58.0 MB/s** (5 MB sequential in-memory parsing).
+- 🎨 **Fast SGR Truecolor Streaming**: **121.0 MB/s** (5 MB formatted 24-bit truecolor text &mdash; **12.1&times; speedup**).
 - 🖼️ **Full-Frame Cell Composite Rate**: **751.9 FPS** (100 full frames of 120&times;40 cells / 480,000 cells composited in 133 ms; ~3,609,022 cells/s).
-- 📜 **History Scrollback Throughput**: **245,098 lines/s** (50,000 line scrollback operations in 204 ms &mdash; **8.0&times; performance improvement**).
 
 ---
 

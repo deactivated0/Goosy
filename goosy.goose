@@ -116,7 +116,6 @@ fn main() {
         print("goosy: failed to initialize font engine");
         exit(1);
     }
-    defer ffi::font_close();
 
     var init_cols = cfg.initial_cols;
     var init_rows = cfg.initial_rows;
@@ -145,14 +144,12 @@ fn main() {
         print("goosy: failed to initialize Wayland display (is WAYLAND_DISPLAY set?)");
         exit(1);
     }
-    defer ffi::wl_close();
 
     var pref_backend = ffi::cmdline_renderer();
     if pref_backend == 0 {
         pref_backend = cfg.renderer_backend;
     }
     ffi::renderer_init(pref_backend);
-    defer ffi::renderer_close();
 
     ffi::wl_set_decoration_mode(cfg.decorations);
 
@@ -167,15 +164,13 @@ fn main() {
         print("goosy: failed to spawn PTY shell");
         exit(1);
     }
-    defer ffi::pty_close();
 
     guard ffi::poll_init(ffi::wl_fd(), ffi::pty_fd()) == 0 else {
         print("goosy: failed to initialize epoll loop");
         exit(1);
     }
-    defer ffi::poll_close();
 
-    var pty_buf: u8[65536]  = [0; 65536];
+    var pty_buf: u8[262144] = [0; 262144];
     var key_utf8: u8[16]    = [0; 16];
     var clip_buf: u8[65536] = [0; 65536];
     var key_out: u8[>..]    = [];
@@ -713,6 +708,7 @@ fn main() {
 
     ffi::pty_close();
     ffi::poll_close();
+    ffi::renderer_close();
     ffi::wl_close();
     ffi::font_close();
 }

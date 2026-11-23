@@ -304,6 +304,7 @@ fn dispatch_csi(p: Parser&, s: screen::Screen&, pal: colors::Palette&, final_b: 
             let top = param_or(p, 0, 1) - 1;
             let bot = param_or(p, 1, s.rows) - 1;
             if top >= 0 && bot < s.rows && top < bot {
+                screen::normalize_grid(s);
                 s.scroll_top = top; s.scroll_bottom = bot;
                 screen::set_cursor(s, 0, if s.origin_mode { top } else { 0 });
             }
@@ -642,78 +643,91 @@ extern fn cells_write_ascii(cells: screen::Cell[:], row_base: i64, cx: i32,
                             data: const u8[:], data_pos: i64, max_count: i32,
                             fg: u32, bg: u32, attrs: u32,
                             ul_style: u32, ul_color: u32, link_id: u32) -> i32 = "goosy_cells_write_ascii";
+extern fn stream_fast(cells: screen::Cell[:], cols: i32, rows: i32,
+                      state: i32[:],
+                      ansi_pal: const u32[:],
+                      sb_cells: screen::Cell[:], sb_cols: i32, sb_cap: i32,
+                      sb_prompt: u8[:], sb_wrapped: u8[:],
+                      prompt_rows: u8[:], wrapped_rows: u8[:],
+                      data: const u8[:], pos: i64) -> i64 = "goosy_stream_fast";
 
 fn feed_slice(p: Parser&, s: screen::Screen&, pal: colors::Palette&, data: const u8[:]) {
     var i: i64 = 0;
     let n = data.len;
     while i < n {
-        // Fast-path: chunk consecutive printable ASCII characters in ST_GROUND
-        if p.state == ST_GROUND && p.utf8_dec.expected == 0 && !s.wrap_pending && s.view_offset == 0 {
-            let row_base = (s.cy as i64) * s.cols;
-            let avail = s.cols - s.cx;
-            if avail > 0 {
-                let k = cells_write_ascii(s.cells[..], row_base, s.cx, data, i, avail,
-                                          s.cur_fg, s.cur_bg, s.cur_attrs,
-                                          s.cur_ul_style, s.cur_ul_color, s.cur_link_id);
-                if k > 0 {
-                    i += k;
-                    if s.cx + k >= s.cols {
-                        s.cx = s.cols - 1;
-                        if s.autowrap { s.wrap_pending = true; }
-                    } else {
-                        s.cx += k;
-                    }
-                    if s.cy < s.dirty_rows.len { s.dirty_rows[s.cy] = 2; }
-                    continue;
-                }
+        // Fast-path: chunk consecutive printable ASCII, newlines, and inline SGR in ST_GROUND
+        if p.state == ST_GROUND && p.utf8_dec.expected == 0 && s.view_offset == 0 {
+            if s.sb_cap_lines > 0 && s.sb_cells.len < (s.sb_cap_lines as i64) * s.sb_cols {
+                let max_cells = (s.sb_cap_lines as i64) * s.sb_cols;
+                let b = screen::blank_cell(s);
+                while s.sb_cells.len < max_cells { s.sb_cells.push(b); }
+                while s.sb_prompt_rows.len < s.sb_cap_lines { s.sb_prompt_rows.push(0); }
+                while s.sb_wrapped_rows.len < s.sb_cap_lines { s.sb_wrapped_rows.push(0); }
+            }
+
+            var stream_state: i32[17] = [
+                s.cx,
+                s.cy,
+                s.grid_offset,
+                if s.wrap_pending { 1 } else { 0 },
+                s.sb_head,
+                s.sb_count,
+                s.scroll_top,
+                s.scroll_bottom,
+                if s.autowrap { 1 } else { 0 },
+                s.cur_fg as i32,
+                s.cur_bg as i32,
+                s.cur_attrs,
+                s.cur_ul_style,
+                s.cur_ul_color as i32,
+                pal.fg as i32,
+                pal.bg as i32,
+                s.cur_link_id as i32,
+            ];
+            let consumed = stream_fast(s.cells[..], s.cols, s.rows,
+                                       stream_state[..],
+                                       pal.ansi[..],
+                                       s.sb_cells[..], s.sb_cols, s.sb_cap_lines,
+                                       s.sb_prompt_rows[..], s.sb_wrapped_rows[..],
+                                       s.prompt_rows[..], s.wrapped_rows[..],
+                                       data, i);
+            if consumed > 0 {
+                s.cx = stream_state[0];
+                s.cy = stream_state[1];
+                s.grid_offset = stream_state[2];
+                s.wrap_pending = (stream_state[3] != 0);
+                s.sb_head = stream_state[4];
+                s.sb_count = stream_state[5];
+                s.cur_fg = stream_state[9] as u32;
+                s.cur_bg = stream_state[10] as u32;
+                s.cur_attrs = stream_state[11] as u16;
+                s.cur_ul_style = stream_state[12] as u8;
+                s.cur_ul_color = stream_state[13] as u32;
+                s.full_redraw_frames = 2;
+                i += consumed;
+                continue;
             }
         }
 
         // Fast-path: SGR ANSI sequence \033[...m in ST_GROUND
         if p.state == ST_GROUND && p.utf8_dec.expected == 0 && data[i] == 0x1B && i + 2 < n && data[i + 1] == '[' {
-            var k = i + 2;
-            var is_sgr = false;
-            while k < n && k < i + 32 {
-                let c = data[k];
-                if c == 'm' {
-                    is_sgr = true;
-                    break;
-                }
-                if !((c >= '0' && c <= '9') || c == ';' || c == ':') {
-                    break;
-                }
-                k += 1;
-            }
-            if is_sgr {
-                p.param_count = 0;
-                var cur_val: i32 = 0;
-                var has_v = false;
-                var next_sub = false;
-                var idx = i + 2;
-                while idx < k {
-                    let c = data[idx];
-                    if c >= '0' && c <= '9' {
-                        has_v = true;
-                        cur_val = cur_val * 10 + (c - '0');
-                    } else if c == ';' || c == ':' {
-                        if p.param_count < MAX_PARAMS {
-                            p.params[p.param_count] = cur_val;
-                            p.is_subparam[p.param_count] = next_sub;
-                            p.param_count += 1;
-                        }
-                        cur_val = 0;
-                        has_v = false;
-                        next_sub = (c == ':');
-                    }
-                    idx += 1;
-                }
-                if has_v && p.param_count < MAX_PARAMS {
-                    p.params[p.param_count] = cur_val;
-                    p.is_subparam[p.param_count] = next_sub;
-                    p.param_count += 1;
-                }
-                apply_sgr(p, s, pal);
-                i = k + 1;
+            var sgr_state: u32[7] = [
+                s.cur_fg,
+                s.cur_bg,
+                s.cur_attrs,
+                s.cur_ul_style,
+                s.cur_ul_color,
+                pal.fg,
+                pal.bg,
+            ];
+            let consumed = ffi::fast_sgr(data, i, sgr_state[..], pal.ansi[..]);
+            if consumed > 0 {
+                s.cur_fg = sgr_state[0];
+                s.cur_bg = sgr_state[1];
+                s.cur_attrs = sgr_state[2] as u16;
+                s.cur_ul_style = sgr_state[3] as u8;
+                s.cur_ul_color = sgr_state[4];
+                i += consumed;
                 continue;
             }
         }

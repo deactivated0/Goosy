@@ -49,6 +49,7 @@ struct Cell {
 root struct Screen {
     cols: i32 = 80,
     rows: i32 = 24,
+    grid_offset: i32 = 0,
     cx: i32 = 0,
     cy: i32 = 0,
     saved_cx: i32 = 0,
@@ -148,6 +149,21 @@ extern fn screen_push_scrollback(sb_cells: Cell[:], sb_cols: i32, dst_line: i32,
                                  prompt_rows: const u8[:], wrapped_rows: const u8[:]) = "goosy_push_scrollback";
 extern fn cells_copy(dst: Cell[:], dst_offset: i64, src: Cell[:], src_offset: i64, count: i64) = "goosy_cells_copy";
 extern fn cells_fill(cells: Cell[:], start_idx: i64, count: i64, fg: u32, bg: u32) = "goosy_cells_fill";
+extern fn cells_normalize_grid(cells: Cell[:], cols: i32, rows: i32, offset: i32,
+                               prompt_rows: u8[:], wrapped_rows: u8[:]) = "goosy_cells_normalize_grid";
+
+fn phys_row(s: Screen&, r: i32) -> i32 {
+    if s.rows <= 0 { return 0; }
+    let pr = (s.grid_offset + r) % s.rows;
+    return if pr < 0 { pr + s.rows } else { pr };
+}
+
+fn normalize_grid(s: Screen&) {
+    if s.grid_offset == 0 { return; }
+    cells_normalize_grid(s.cells[..], s.cols, s.rows, s.grid_offset,
+                         s.prompt_rows[..], s.wrapped_rows[..]);
+    s.grid_offset = 0;
+}
 
 fn blank_cell(s: Screen&) -> Cell {
     return Cell {
@@ -247,6 +263,7 @@ fn init(s: Screen&, cols: i32, rows: i32, fg: u32, bg: u32, sb_lines: i32, curso
     s.sb_cells.clear();
     s.sb_prompt_rows.clear();
     s.sb_wrapped_rows.clear();
+    s.grid_offset = 0;
     // On-demand allocation: avoid allocating up to 100,000 blank rows at startup.
     // Rows are grown dynamically in push_scrollback_row, saving ~20 MB idle RSS and cutting startup time.
     s.full_redraw_frames = 2;
@@ -268,8 +285,11 @@ fn set_cursor(s: Screen&, x: i32, y: i32) {
 }
 
 fn mark_prompt_row(s: Screen&) {
-    if !s.alt_screen && s.cy >= 0 && s.cy < s.prompt_rows.len {
-        s.prompt_rows[s.cy] = 1;
+    if !s.alt_screen && s.cy >= 0 && s.cy < s.rows {
+        let pr = phys_row(s, s.cy);
+        if pr < s.prompt_rows.len {
+            s.prompt_rows[pr] = 1;
+        }
     }
 }
 
@@ -302,7 +322,7 @@ fn push_scrollback_row(s: Screen&, row: i32) {
     while s.sb_wrapped_rows.len <= dst_line { s.sb_wrapped_rows.push(0); }
 
     screen_push_scrollback(s.sb_cells[..], s.sb_cols, dst_line,
-                           s.cells[..], s.cols, row,
+                           s.cells[..], s.cols, phys_row(s, row),
                            s.sb_prompt_rows[..], s.sb_wrapped_rows[..],
                            s.prompt_rows[..], s.wrapped_rows[..]);
 }
@@ -311,10 +331,27 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
     if n <= 0 || top < 0 || bottom >= s.rows || top > bottom { return; }
     let count = if n > (bottom - top + 1) { bottom - top + 1 } else { n };
 
-    if top == 0 && bottom == s.rows - 1 && !s.alt_screen {
-        for i in 0..count { push_scrollback_row(s, i); }
+    if top == 0 && bottom == s.rows - 1 {
+        if !s.alt_screen {
+            for i in 0..count { push_scrollback_row(s, i); }
+        }
+        s.grid_offset = (s.grid_offset + count) % s.rows;
+        let ec = erase_cell(s);
+        for i in 0..count {
+            let log_r = s.rows - count + i;
+            let pr = phys_row(s, log_r);
+            let base = (pr as i64) * s.cols;
+            cells_fill(s.cells[..], base, s.cols, ec.fg, ec.bg);
+            if pr < s.prompt_rows.len { s.prompt_rows[pr] = 0; }
+            if pr < s.wrapped_rows.len { s.wrapped_rows[pr] = 0; }
+        }
+        for r in 0..s.rows {
+            if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
+        }
+        return;
     }
 
+    normalize_grid(s);
     let ec = erase_cell(s);
     screen_scroll_up(s.cells[..], s.cols, top, bottom, count,
                      s.prompt_rows[..], s.wrapped_rows[..], s.dirty_rows[..],
@@ -325,6 +362,24 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
     if n <= 0 || top < 0 || bottom >= s.rows || top > bottom { return; }
     let count = if n > (bottom - top + 1) { bottom - top + 1 } else { n };
 
+    if top == 0 && bottom == s.rows - 1 {
+        s.grid_offset = (s.grid_offset - count) % s.rows;
+        if s.grid_offset < 0 { s.grid_offset += s.rows; }
+        let ec = erase_cell(s);
+        for i in 0..count {
+            let pr = phys_row(s, i);
+            let base = (pr as i64) * s.cols;
+            cells_fill(s.cells[..], base, s.cols, ec.fg, ec.bg);
+            if pr < s.prompt_rows.len { s.prompt_rows[pr] = 0; }
+            if pr < s.wrapped_rows.len { s.wrapped_rows[pr] = 0; }
+        }
+        for r in 0..s.rows {
+            if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
+        }
+        return;
+    }
+
+    normalize_grid(s);
     let row_count = bottom - count + 1 - top;
     cells_scroll_down(s.cells[..], s.cols, top, bottom, count);
     var r = row_count - 1;
@@ -389,7 +444,8 @@ fn put_codepoint(s: Screen&, cp: u32) {
     if w == 0 {
         if utf8::is_combining(cp) {
             let prev_x = if s.wrap_pending { s.cx } else if s.cx > 0 { s.cx - 1 } else { 0 };
-            let idx = (s.cy as i64) * s.cols + prev_x;
+            let pr = phys_row(s, s.cy);
+            let idx = (pr as i64) * s.cols + prev_x;
             if idx >= 0 && idx < s.cells.len {
                 s.cells[idx].combining = cp;
                 mark_row_dirty(s, s.cy);
@@ -401,25 +457,28 @@ fn put_codepoint(s: Screen&, cp: u32) {
     if s.wrap_pending {
         s.wrap_pending = false;
         if s.autowrap {
-            if s.cy >= 0 && s.cy < s.wrapped_rows.len {
-                s.wrapped_rows[s.cy] = 1;
+            let pr = phys_row(s, s.cy);
+            if pr >= 0 && pr < s.wrapped_rows.len {
+                s.wrapped_rows[pr] = 1;
             }
             s.cx = 0; linefeed(s);
         }
     }
 
     if w == 2 && s.cx == s.cols - 1 && s.autowrap {
-        let pad_idx = (s.cy as i64) * s.cols + s.cx;
+        let pr = phys_row(s, s.cy);
+        let pad_idx = (pr as i64) * s.cols + s.cx;
         s.cells[pad_idx] = erase_cell(s);
         mark_row_dirty(s, s.cy);
-        if s.cy >= 0 && s.cy < s.wrapped_rows.len {
-            s.wrapped_rows[s.cy] = 1;
+        if pr >= 0 && pr < s.wrapped_rows.len {
+            s.wrapped_rows[pr] = 1;
         }
         s.cx = 0;
         linefeed(s);
     }
 
-    let idx = (s.cy as i64) * s.cols + s.cx;
+    let pr = phys_row(s, s.cy);
+    let idx = (pr as i64) * s.cols + s.cx;
     s.cells[idx] = Cell {
         cp: cp, combining: 0, fg: s.cur_fg, bg: s.cur_bg,
         attrs: s.cur_attrs, width: w as! u8, flags: 0,
@@ -448,16 +507,29 @@ fn erase_display(s: Screen&, mode: i32) {
     s.wrap_pending = false;
     let ec = erase_cell(s);
     if mode == 0 {
-        let start = (s.cy as i64) * s.cols + s.cx;
-        for i in start..s.cells.len { s.cells[i] = ec; }
+        let cur_pr = phys_row(s, s.cy);
+        let cur_base = (cur_pr as i64) * s.cols;
+        for c in s.cx..s.cols { s.cells[cur_base + c] = ec; }
+        for r in (s.cy + 1)..s.rows {
+            let pr = phys_row(s, r);
+            let b = (pr as i64) * s.cols;
+            for c in 0..s.cols { s.cells[b + c] = ec; }
+        }
         for r in s.cy..s.rows { mark_row_dirty(s, r); }
     } else if mode == 1 {
-        let end = (s.cy as i64) * s.cols + s.cx + 1;
-        for i in 0..end { if i < s.cells.len { s.cells[i] = ec; } }
+        for r in 0..s.cy {
+            let pr = phys_row(s, r);
+            let b = (pr as i64) * s.cols;
+            for c in 0..s.cols { s.cells[b + c] = ec; }
+        }
+        let cur_pr = phys_row(s, s.cy);
+        let cur_base = (cur_pr as i64) * s.cols;
+        for c in 0..(s.cx + 1) { if c < s.cols { s.cells[cur_base + c] = ec; } }
         for r in 0..(s.cy + 1) { mark_row_dirty(s, r); }
     } else if mode == 2 || mode == 3 {
         for i in 0..s.cells.len { s.cells[i] = ec; }
         for r in 0..s.rows { if r < s.prompt_rows.len { s.prompt_rows[r] = 0; } }
+        s.grid_offset = 0;
         if mode == 3 {
             s.sb_head = 0; s.sb_count = 0; s.view_offset = 0;
         }
@@ -468,7 +540,7 @@ fn erase_display(s: Screen&, mode: i32) {
 fn erase_line(s: Screen&, mode: i32) {
     s.wrap_pending = false;
     let ec = erase_cell(s);
-    let base = (s.cy as i64) * s.cols;
+    let base = (phys_row(s, s.cy) as i64) * s.cols;
     if mode == 0 {
         for c in s.cx..s.cols { s.cells[base + c] = ec; }
     } else if mode == 1 {
@@ -490,7 +562,7 @@ fn delete_lines(s: Screen&, n: i32) {
 fn insert_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
-    let base = (s.cy as i64) * s.cols;
+    let base = (phys_row(s, s.cy) as i64) * s.cols;
     var c = s.cols - 1;
     while c >= s.cx + count {
         s.cells[base + c] = s.cells[base + (c - count)];
@@ -504,7 +576,7 @@ fn insert_chars(s: Screen&, n: i32) {
 fn delete_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
-    let base = (s.cy as i64) * s.cols;
+    let base = (phys_row(s, s.cy) as i64) * s.cols;
     for c in s.cx..(s.cols - count) {
         s.cells[base + c] = s.cells[base + (c + count)];
     }
@@ -516,7 +588,7 @@ fn delete_chars(s: Screen&, n: i32) {
 fn erase_chars(s: Screen&, n: i32) {
     if n <= 0 { return; }
     let count = if n > (s.cols - s.cx) { s.cols - s.cx } else { n };
-    let base = (s.cy as i64) * s.cols;
+    let base = (phys_row(s, s.cy) as i64) * s.cols;
     let ec = erase_cell(s);
     for c in s.cx..(s.cx + count) { s.cells[base + c] = ec; }
     mark_row_dirty(s, s.cy);
@@ -535,6 +607,7 @@ fn tab_forward(s: Screen&) {
 }
 
 fn swap_buffers(s: Screen&) {
+    normalize_grid(s);
     let n = if s.cells.len < s.alt_cells.len { s.cells.len } else { s.alt_cells.len };
     for i in 0..n {
         let tmp = s.cells[i]; s.cells[i] = s.alt_cells[i]; s.alt_cells[i] = tmp;
@@ -571,6 +644,7 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
     let nc = if new_cols < 2 { 2 } else if new_cols > MAX_COLS { MAX_COLS } else { new_cols };
     let nr = if new_rows < 2 { 2 } else if new_rows > MAX_ROWS { MAX_ROWS } else { new_rows };
     if nc == s.cols && nr == s.rows { return; }
+    normalize_grid(s);
 
     let b = blank_cell(s);
 
@@ -797,7 +871,8 @@ fn history_cell(s: Screen&, abs_line: i32, col: i32) -> Cell {
     if col < 0 || col >= s.cols { return blank_cell(s); }
     if s.alt_screen {
         if abs_line < 0 || abs_line >= s.rows { return blank_cell(s); }
-        return s.cells[(abs_line as i64) * s.cols + col];
+        let pr = phys_row(s, abs_line);
+        return s.cells[(pr as i64) * s.cols + col];
     }
     if abs_line < 0 || abs_line >= s.sb_count + s.rows { return blank_cell(s); }
     if abs_line < s.sb_count {
@@ -807,7 +882,8 @@ fn history_cell(s: Screen&, abs_line: i32, col: i32) -> Cell {
         return if idx >= 0 && idx < s.sb_cells.len { s.sb_cells[idx] } else { blank_cell(s) };
     }
     let live_row = abs_line - s.sb_count;
-    return s.cells[(live_row as i64) * s.cols + col];
+    let pr = phys_row(s, live_row);
+    return s.cells[(pr as i64) * s.cols + col];
 }
 
 fn history_is_prompt(s: Screen&, abs_line: i32) -> bool {
@@ -817,7 +893,8 @@ fn history_is_prompt(s: Screen&, abs_line: i32) -> bool {
         return line_idx < s.sb_prompt_rows.len && s.sb_prompt_rows[line_idx] != 0;
     }
     let live_row = abs_line - s.sb_count;
-    return live_row < s.prompt_rows.len && s.prompt_rows[live_row] != 0;
+    let pr = phys_row(s, live_row);
+    return pr < s.prompt_rows.len && s.prompt_rows[pr] != 0;
 }
 
 // Jump to previous currently-not-visible prompt (Ctrl+Shift+Z, requires OSC 133;A)
@@ -896,7 +973,8 @@ fn select_last_command_output(s: Screen&) -> bool {
 fn visible_cell(s: Screen&, col: i32, row: i32) -> Cell {
     if col < 0 || col >= s.cols || row < 0 || row >= s.rows { return blank_cell(s); }
     if s.view_offset == 0 || s.alt_screen {
-        return s.cells[(row as i64) * s.cols + col];
+        let pr = phys_row(s, row);
+        return s.cells[(pr as i64) * s.cols + col];
     }
     let abs_line = s.sb_count - s.view_offset + row;
     return history_cell(s, abs_line, col);

@@ -23,6 +23,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <sched.h>
 
 static int     g_master_fd = -1;
 static pid_t   g_child_pid = -1;
@@ -410,20 +411,38 @@ int64_t goosy_pty_read(goosy_bytes_t buf) {
     if (g_master_fd < 0 || !buf.data || buf.len <= 0) {
         return -1;
     }
-    ssize_t n = read(g_master_fd, buf.data, (size_t)buf.len);
-    if (n > 0) {
-        return (int64_t)n;
+    size_t total = 0;
+    int retries = 0;
+    while (total < (size_t)buf.len) {
+        ssize_t n = read(g_master_fd, buf.data + total, (size_t)buf.len - total);
+        if (n > 0) {
+            total += (size_t)n;
+            retries = 0;
+            continue;
+        }
+        if (n == 0) {
+            return total > 0 ? (int64_t)total : 0;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            if (total > 0 && total < (size_t)buf.len && retries < 4) {
+                retries++;
+                sched_yield();
+                continue;
+            }
+            break;
+        }
+        if (errno == EIO) {
+            return total > 0 ? (int64_t)total : 0;
+        }
+        return total > 0 ? (int64_t)total : -1;
     }
-    if (n == 0) {
-        return 0;
+    if (total > 0) {
+        return (int64_t)total;
     }
-    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-        return -2;
-    }
-    if (errno == EIO) {
-        return 0;
-    }
-    return -1;
+    return -2;
 }
 
 #define PTY_INITIAL_CAP (64 * 1024)
@@ -795,6 +814,533 @@ void goosy_cells_fill(goosy_cells_slice_t cells, int64_t start_idx, int64_t coun
     for (int64_t i = 0; i < count; i++) {
         arr[i] = blank;
     }
+}
+
+void goosy_cells_normalize_grid(goosy_cells_slice_t cells, int32_t cols, int32_t rows, int32_t offset,
+                                goosy_bytes_t prompt_rows, goosy_bytes_t wrapped_rows) {
+    if (!cells.data || cols <= 0 || rows <= 1 || offset <= 0 || offset >= rows) return;
+    int64_t total = (int64_t)rows * cols;
+    if (total > cells.len) return;
+
+    size_t cell_sz = sizeof(goosy_cell_t);
+    size_t total_bytes = (size_t)total * cell_sz;
+    goosy_cell_t *tmp_cells = malloc(total_bytes);
+    if (!tmp_cells) return;
+
+    const goosy_cell_t *src_cells = (const goosy_cell_t *)cells.data;
+    for (int32_t r = 0; r < rows; r++) {
+        int32_t phys_r = (offset + r) % rows;
+        memcpy(tmp_cells + (int64_t)r * cols, src_cells + (int64_t)phys_r * cols, (size_t)cols * cell_sz);
+    }
+    memcpy(cells.data, tmp_cells, total_bytes);
+    free(tmp_cells);
+
+    if (prompt_rows.data && prompt_rows.len >= rows) {
+        uint8_t tmp_p[512];
+        uint8_t *p_buf = rows <= 512 ? tmp_p : malloc((size_t)rows);
+        if (p_buf) {
+            for (int32_t r = 0; r < rows; r++) {
+                p_buf[r] = prompt_rows.data[(offset + r) % rows];
+            }
+            memcpy(prompt_rows.data, p_buf, (size_t)rows);
+            if (p_buf != tmp_p) free(p_buf);
+        }
+    }
+
+    if (wrapped_rows.data && wrapped_rows.len >= rows) {
+        uint8_t tmp_w[512];
+        uint8_t *w_buf = rows <= 512 ? tmp_w : malloc((size_t)rows);
+        if (w_buf) {
+            for (int32_t r = 0; r < rows; r++) {
+                w_buf[r] = wrapped_rows.data[(offset + r) % rows];
+            }
+            memcpy(wrapped_rows.data, w_buf, (size_t)rows);
+            if (w_buf != tmp_w) free(w_buf);
+        }
+    }
+}
+
+static inline uint32_t sgr_resolve_256(const uint32_t *ansi, int64_t ansi_len, int32_t idx) {
+    if (idx < 0) return 0;
+    if (idx < 16 && ansi && idx < ansi_len) return ansi[idx];
+    if (idx >= 16 && idx <= 231) {
+        int n = idx - 16;
+        int r = n / 36;
+        int g = (n % 36) / 6;
+        int b = n % 6;
+        static const uint8_t v[] = { 0x00, 0x5F, 0x87, 0xAF, 0xD7, 0xFF };
+        return ((uint32_t)v[r] << 16) | ((uint32_t)v[g] << 8) | (uint32_t)v[b];
+    }
+    if (idx >= 232 && idx <= 255) {
+        uint8_t c = (uint8_t)(8 + (idx - 232) * 10);
+        return ((uint32_t)c << 16) | ((uint32_t)c << 8) | (uint32_t)c;
+    }
+    return 0xEAEAEA;
+}
+
+int32_t goosy_fast_sgr(goosy_const_bytes_t data, int64_t pos,
+                       goosy_u32_slice_t out_state,
+                       goosy_const_u32_slice_t ansi_pal) {
+    if (!data.data || pos < 0 || pos + 2 >= data.len || !out_state.data || out_state.len < 7) {
+        return 0;
+    }
+    const uint8_t *src = data.data;
+    if (src[pos] != 0x1B || src[pos + 1] != '[') {
+        return 0;
+    }
+
+    int64_t k = pos + 2;
+    int64_t limit = pos + 64 < data.len ? pos + 64 : data.len;
+    bool found_m = false;
+    while (k < limit) {
+        uint8_t c = src[k];
+        if (c == 'm') {
+            found_m = true;
+            break;
+        }
+        if (!((c >= '0' && c <= '9') || c == ';' || c == ':')) {
+            return 0;
+        }
+        k++;
+    }
+    if (!found_m) return 0;
+
+    int32_t params[16];
+    uint8_t is_sub[16];
+    int32_t pcount = 0;
+
+    int32_t cur_val = 0;
+    bool has_v = false;
+    uint8_t next_sub = 0;
+    int64_t idx = pos + 2;
+
+    while (idx < k) {
+        uint8_t c = src[idx];
+        if (c >= '0' && c <= '9') {
+            has_v = true;
+            cur_val = cur_val * 10 + (c - '0');
+        } else if (c == ';' || c == ':') {
+            if (pcount < 16) {
+                params[pcount] = cur_val;
+                is_sub[pcount] = next_sub;
+                pcount++;
+            }
+            cur_val = 0;
+            has_v = false;
+            next_sub = (c == ':') ? 1 : 0;
+        }
+        idx++;
+    }
+    if (has_v && pcount < 16) {
+        params[pcount] = cur_val;
+        is_sub[pcount] = next_sub;
+        pcount++;
+    }
+
+    uint32_t fg = out_state.data[0];
+    uint32_t bg = out_state.data[1];
+    uint16_t attrs = (uint16_t)out_state.data[2];
+    uint8_t  ul_style = (uint8_t)out_state.data[3];
+    uint32_t ul_color = out_state.data[4];
+    uint32_t def_fg = out_state.data[5];
+    uint32_t def_bg = out_state.data[6];
+
+    if (pcount == 0) {
+        fg = def_fg;
+        bg = def_bg;
+        attrs = 0;
+        ul_style = 0;
+        ul_color = 0;
+    } else {
+        int32_t i = 0;
+        while (i < pcount) {
+            int32_t code = params[i];
+            if (code == 0) {
+                fg = def_fg;
+                bg = def_bg;
+                attrs = 0;
+                ul_style = 0;
+                ul_color = 0;
+            } else if (code == 1) {
+                attrs |= 1; // BOLD
+            } else if (code == 2) {
+                attrs |= 64; // DIM
+            } else if (code == 3) {
+                attrs |= 2; // ITALIC
+            } else if (code == 4) {
+                if (i + 1 < pcount && is_sub[i + 1] && params[i + 1] >= 0 && params[i + 1] <= 5) {
+                    int32_t sub = params[i + 1];
+                    if (sub == 0) {
+                        attrs &= ~4;
+                        ul_style = 0;
+                    } else {
+                        attrs |= 4;
+                        ul_style = (uint8_t)sub;
+                    }
+                    i++;
+                } else {
+                    attrs |= 4;
+                    ul_style = 1;
+                }
+            } else if (code == 5 || code == 6) {
+                attrs |= 8; // BLINK
+            } else if (code == 7) {
+                attrs |= 16; // INVERSE
+            } else if (code == 8) {
+                attrs |= 128; // HIDDEN
+            } else if (code == 9) {
+                attrs |= 32; // STRIKE
+            } else if (code == 22) {
+                attrs &= ~(1 | 64);
+            } else if (code == 23) {
+                attrs &= ~2;
+            } else if (code == 24) {
+                attrs &= ~4;
+                ul_style = 0;
+                ul_color = 0;
+            } else if (code == 25) {
+                attrs &= ~8;
+            } else if (code == 27) {
+                attrs &= ~16;
+            } else if (code == 28) {
+                attrs &= ~128;
+            } else if (code == 29) {
+                attrs &= ~32;
+            } else if (code >= 30 && code <= 37) {
+                if (ansi_pal.data && code - 30 < ansi_pal.len) fg = ansi_pal.data[code - 30];
+            } else if (code == 39) {
+                fg = def_fg;
+            } else if (code >= 40 && code <= 47) {
+                if (ansi_pal.data && code - 40 < ansi_pal.len) bg = ansi_pal.data[code - 40];
+            } else if (code == 49) {
+                bg = def_bg;
+            } else if (code >= 90 && code <= 97) {
+                if (ansi_pal.data && code - 90 + 8 < ansi_pal.len) fg = ansi_pal.data[code - 90 + 8];
+            } else if (code >= 100 && code <= 107) {
+                if (ansi_pal.data && code - 100 + 8 < ansi_pal.len) bg = ansi_pal.data[code - 100 + 8];
+            } else if (code == 38 || code == 48) {
+                bool is_fg = (code == 38);
+                if (i + 2 < pcount && params[i + 1] == 5) {
+                    uint32_t rgb = sgr_resolve_256(ansi_pal.data, ansi_pal.len, params[i + 2]);
+                    if (is_fg) fg = rgb; else bg = rgb;
+                    i += 2;
+                } else if (i + 4 < pcount && params[i + 1] == 2) {
+                    if (i + 5 < pcount && is_sub[i + 1] && is_sub[i + 2]) {
+                        uint32_t rgb = ((uint32_t)(params[i + 3] & 0xFF) << 16) |
+                                       ((uint32_t)(params[i + 4] & 0xFF) << 8)  |
+                                       ((uint32_t)(params[i + 5] & 0xFF));
+                        if (is_fg) fg = rgb; else bg = rgb;
+                        i += 5;
+                    } else {
+                        uint32_t rgb = ((uint32_t)(params[i + 2] & 0xFF) << 16) |
+                                       ((uint32_t)(params[i + 3] & 0xFF) << 8)  |
+                                       ((uint32_t)(params[i + 4] & 0xFF));
+                        if (is_fg) fg = rgb; else bg = rgb;
+                        i += 4;
+                    }
+                }
+            } else if (code == 58) {
+                if (i + 2 < pcount && params[i + 1] == 5) {
+                    ul_color = sgr_resolve_256(ansi_pal.data, ansi_pal.len, params[i + 2]);
+                    i += 2;
+                } else if (i + 4 < pcount && params[i + 1] == 2) {
+                    if (i + 5 < pcount && is_sub[i + 1] && is_sub[i + 2]) {
+                        ul_color = ((uint32_t)(params[i + 3] & 0xFF) << 16) |
+                                   ((uint32_t)(params[i + 4] & 0xFF) << 8)  |
+                                   ((uint32_t)(params[i + 5] & 0xFF));
+                        i += 5;
+                    } else {
+                        ul_color = ((uint32_t)(params[i + 2] & 0xFF) << 16) |
+                                   ((uint32_t)(params[i + 3] & 0xFF) << 8)  |
+                                   ((uint32_t)(params[i + 4] & 0xFF));
+                        i += 4;
+                    }
+                }
+            } else if (code == 59) {
+                ul_color = 0;
+            }
+            i++;
+        }
+    }
+
+    out_state.data[0] = fg;
+    out_state.data[1] = bg;
+    out_state.data[2] = (uint32_t)attrs;
+    out_state.data[3] = (uint32_t)ul_style;
+    out_state.data[4] = ul_color;
+
+    return (int32_t)(k - pos + 1);
+}
+
+static inline void clear_cells_row(goosy_cell_t *row_cells, int32_t cols, goosy_cell_t blank) {
+    static goosy_cell_t s_blank_row[1024];
+    static bool s_blank_inited = false;
+    static uint32_t s_last_fg = 0;
+    static uint32_t s_last_bg = 0;
+
+    if (!s_blank_inited || s_last_fg != blank.fg || s_last_bg != blank.bg) {
+        for (int i = 0; i < 1024; i++) s_blank_row[i] = blank;
+        s_blank_inited = true;
+        s_last_fg = blank.fg;
+        s_last_bg = blank.bg;
+    }
+    if (cols <= 1024) {
+        memcpy(row_cells, s_blank_row, (size_t)cols * sizeof(goosy_cell_t));
+    } else {
+        for (int32_t c = 0; c < cols; c++) row_cells[c] = blank;
+    }
+}
+
+int64_t goosy_stream_fast(goosy_cells_slice_t cells, int32_t cols, int32_t rows,
+                          goosy_i32_slice_t state,
+                          goosy_const_u32_slice_t ansi_pal,
+                          goosy_cells_slice_t sb_cells, int32_t sb_cols, int32_t sb_cap,
+                          goosy_bytes_t sb_prompt, goosy_bytes_t sb_wrapped,
+                          goosy_bytes_t prompt_rows, goosy_bytes_t wrapped_rows,
+                          goosy_const_bytes_t data, int64_t pos) {
+    if (!cells.data || cols <= 0 || rows <= 0 || !state.data || state.len < 17 ||
+        !data.data || pos < 0 || pos >= data.len) {
+        return 0;
+    }
+
+    int32_t cx = state.data[0];
+    int32_t cy = state.data[1];
+    int32_t grid_off = state.data[2];
+    bool wrap_pend = (state.data[3] != 0);
+    int32_t sb_head = state.data[4];
+    int32_t sb_count = state.data[5];
+    int32_t scroll_top = state.data[6];
+    int32_t scroll_bottom = state.data[7];
+    bool autowrap = (state.data[8] != 0);
+    uint32_t fg = (uint32_t)state.data[9];
+    uint32_t bg = (uint32_t)state.data[10];
+    uint16_t attrs = (uint16_t)state.data[11];
+    uint8_t  ul_style = (uint8_t)state.data[12];
+    uint32_t ul_color = (uint32_t)state.data[13];
+    uint32_t def_fg = (uint32_t)state.data[14];
+    uint32_t def_bg = (uint32_t)state.data[15];
+    uint32_t link_id = (uint32_t)state.data[16];
+
+    goosy_cell_t tmpl;
+    memset(&tmpl, 0, sizeof(tmpl));
+    tmpl.fg = fg;
+    tmpl.bg = bg;
+    tmpl.attrs = attrs;
+    tmpl.width = 1;
+    tmpl.ul_style = ul_style;
+    tmpl.ul_color = ul_color;
+    tmpl.link_id = link_id;
+
+    goosy_cell_t blank;
+    memset(&blank, 0, sizeof(blank));
+    blank.cp = 0x20;
+    blank.fg = fg;
+    blank.bg = bg;
+    blank.width = 1;
+
+    int32_t phys_r = (grid_off + cy) % rows;
+    goosy_cell_t *cur_row_cells = (goosy_cell_t *)cells.data + (int64_t)phys_r * cols;
+
+    const uint8_t *src = data.data;
+    int64_t i = pos;
+    int64_t n = data.len;
+
+    while (i < n) {
+        uint8_t b = src[i];
+
+        // SGR ANSI sequence \033[...m fast inline handling
+        if (b == 0x1B && i + 2 < n && src[i + 1] == '[') {
+            uint32_t sgr_buf[7] = { tmpl.fg, tmpl.bg, (uint32_t)tmpl.attrs, (uint32_t)tmpl.ul_style, tmpl.ul_color, def_fg, def_bg };
+            goosy_u32_slice_t out_state = { sgr_buf, 7 };
+            int32_t consumed = goosy_fast_sgr(data, i, out_state, ansi_pal);
+            if (consumed > 0) {
+                tmpl.fg = sgr_buf[0];
+                tmpl.bg = sgr_buf[1];
+                tmpl.attrs = (uint16_t)sgr_buf[2];
+                tmpl.ul_style = (uint8_t)sgr_buf[3];
+                tmpl.ul_color = sgr_buf[4];
+                blank.fg = tmpl.fg;
+                blank.bg = tmpl.bg;
+                i += consumed;
+                continue;
+            }
+        }
+
+        // Printable ASCII
+        if (b >= 0x20 && b < 0x7F) {
+            if (wrap_pend) {
+                wrap_pend = false;
+                if (autowrap) {
+                    int32_t pr = (grid_off + cy) % rows;
+                    if (wrapped_rows.data && pr < wrapped_rows.len) wrapped_rows.data[pr] = 1;
+                    cx = 0;
+                    if (cy == scroll_bottom) {
+                        if (scroll_top == 0 && scroll_bottom == rows - 1) {
+                            int32_t phys_top = grid_off;
+                            if (sb_cap > 0 && sb_cells.data) {
+                                int32_t dst_line = (sb_head + sb_count) % sb_cap;
+                                if (sb_count == sb_cap) {
+                                    sb_head = (sb_head + 1) % sb_cap;
+                                } else {
+                                    sb_count++;
+                                }
+                                int64_t dst_idx = (int64_t)dst_line * sb_cols;
+                                int64_t src_idx = (int64_t)phys_top * cols;
+                                if (dst_idx + sb_cols <= sb_cells.len && src_idx + cols <= cells.len) {
+                                    int32_t copy_c = cols < sb_cols ? cols : sb_cols;
+                                    memcpy((goosy_cell_t *)sb_cells.data + dst_idx,
+                                           (goosy_cell_t *)cells.data + src_idx,
+                                           (size_t)copy_c * sizeof(goosy_cell_t));
+                                }
+                                if (sb_prompt.data && dst_line < sb_prompt.len && prompt_rows.data && phys_top < prompt_rows.len)
+                                    sb_prompt.data[dst_line] = prompt_rows.data[phys_top];
+                                if (sb_wrapped.data && dst_line < sb_wrapped.len && wrapped_rows.data && phys_top < wrapped_rows.len)
+                                    sb_wrapped.data[dst_line] = wrapped_rows.data[phys_top];
+                            }
+                            grid_off = (grid_off + 1) % rows;
+                            int64_t clear_base = (int64_t)phys_top * cols;
+                            if (clear_base + cols <= cells.len) {
+                                clear_cells_row((goosy_cell_t *)cells.data + clear_base, cols, blank);
+                            }
+                            if (prompt_rows.data && phys_top < prompt_rows.len) prompt_rows.data[phys_top] = 0;
+                            if (wrapped_rows.data && phys_top < wrapped_rows.len) wrapped_rows.data[phys_top] = 0;
+                        } else {
+                            break;
+                        }
+                    } else if (cy < rows - 1) {
+                        cy++;
+                    }
+                    phys_r = (grid_off + cy) % rows;
+                    cur_row_cells = (goosy_cell_t *)cells.data + (int64_t)phys_r * cols;
+                }
+            }
+
+            // Inner tight loop: consume contiguous printable ASCII into current row
+            while (i < n && cx < cols) {
+                uint8_t ch = src[i];
+                if (ch < 0x20 || ch >= 0x7F) break;
+                tmpl.cp = (uint32_t)ch;
+                cur_row_cells[cx++] = tmpl;
+                i++;
+            }
+            if (cx >= cols) {
+                cx = cols - 1;
+                if (autowrap) wrap_pend = true;
+            }
+            continue;
+        }
+
+        // CRLF fast handling
+        if (b == 0x0D) {
+            if (i + 1 < n && src[i + 1] == 0x0A) {
+                wrap_pend = false;
+                cx = 0;
+                if (cy == scroll_bottom) {
+                    if (scroll_top == 0 && scroll_bottom == rows - 1) {
+                        int32_t phys_top = grid_off;
+                        if (sb_cap > 0 && sb_cells.data) {
+                            int32_t dst_line = (sb_head + sb_count) % sb_cap;
+                            if (sb_count == sb_cap) {
+                                sb_head = (sb_head + 1) % sb_cap;
+                            } else {
+                                sb_count++;
+                            }
+                            int64_t dst_idx = (int64_t)dst_line * sb_cols;
+                            int64_t src_idx = (int64_t)phys_top * cols;
+                            if (dst_idx + sb_cols <= sb_cells.len && src_idx + cols <= cells.len) {
+                                int32_t copy_c = cols < sb_cols ? cols : sb_cols;
+                                memcpy((goosy_cell_t *)sb_cells.data + dst_idx,
+                                       (goosy_cell_t *)cells.data + src_idx,
+                                       (size_t)copy_c * sizeof(goosy_cell_t));
+                            }
+                            if (sb_prompt.data && dst_line < sb_prompt.len && prompt_rows.data && phys_top < prompt_rows.len)
+                                sb_prompt.data[dst_line] = prompt_rows.data[phys_top];
+                            if (sb_wrapped.data && dst_line < sb_wrapped.len && wrapped_rows.data && phys_top < wrapped_rows.len)
+                                sb_wrapped.data[dst_line] = wrapped_rows.data[phys_top];
+                        }
+                        grid_off = (grid_off + 1) % rows;
+                        int64_t clear_base = (int64_t)phys_top * cols;
+                        if (clear_base + cols <= cells.len) {
+                            clear_cells_row((goosy_cell_t *)cells.data + clear_base, cols, blank);
+                        }
+                        if (prompt_rows.data && phys_top < prompt_rows.len) prompt_rows.data[phys_top] = 0;
+                        if (wrapped_rows.data && phys_top < wrapped_rows.len) wrapped_rows.data[phys_top] = 0;
+                    } else {
+                        break;
+                    }
+                } else if (cy < rows - 1) {
+                    cy++;
+                }
+                phys_r = (grid_off + cy) % rows;
+                cur_row_cells = (goosy_cell_t *)cells.data + (int64_t)phys_r * cols;
+                i += 2;
+                continue;
+            } else {
+                wrap_pend = false;
+                cx = 0;
+                i++;
+                continue;
+            }
+        } else if (b == 0x0A) {
+            wrap_pend = false;
+            if (cy == scroll_bottom) {
+                if (scroll_top == 0 && scroll_bottom == rows - 1) {
+                    int32_t phys_top = grid_off;
+                    if (sb_cap > 0 && sb_cells.data) {
+                        int32_t dst_line = (sb_head + sb_count) % sb_cap;
+                        if (sb_count == sb_cap) {
+                            sb_head = (sb_head + 1) % sb_cap;
+                        } else {
+                            sb_count++;
+                        }
+                        int64_t dst_idx = (int64_t)dst_line * sb_cols;
+                        int64_t src_idx = (int64_t)phys_top * cols;
+                        if (dst_idx + sb_cols <= sb_cells.len && src_idx + cols <= cells.len) {
+                            int32_t copy_c = cols < sb_cols ? cols : sb_cols;
+                            memcpy((goosy_cell_t *)sb_cells.data + dst_idx,
+                                   (goosy_cell_t *)cells.data + src_idx,
+                                   (size_t)copy_c * sizeof(goosy_cell_t));
+                        }
+                        if (sb_prompt.data && dst_line < sb_prompt.len && prompt_rows.data && phys_top < prompt_rows.len)
+                            sb_prompt.data[dst_line] = prompt_rows.data[phys_top];
+                        if (sb_wrapped.data && dst_line < sb_wrapped.len && wrapped_rows.data && phys_top < wrapped_rows.len)
+                            sb_wrapped.data[dst_line] = wrapped_rows.data[phys_top];
+                    }
+                    grid_off = (grid_off + 1) % rows;
+                    int64_t clear_base = (int64_t)phys_top * cols;
+                    if (clear_base + cols <= cells.len) {
+                        clear_cells_row((goosy_cell_t *)cells.data + clear_base, cols, blank);
+                    }
+                    if (prompt_rows.data && phys_top < prompt_rows.len) prompt_rows.data[phys_top] = 0;
+                    if (wrapped_rows.data && phys_top < wrapped_rows.len) wrapped_rows.data[phys_top] = 0;
+                } else {
+                    break;
+                }
+            } else if (cy < rows - 1) {
+                cy++;
+            }
+            phys_r = (grid_off + cy) % rows;
+            cur_row_cells = (goosy_cell_t *)cells.data + (int64_t)phys_r * cols;
+            i++;
+            continue;
+        }
+
+        break;
+    }
+
+    state.data[0] = cx;
+    state.data[1] = cy;
+    state.data[2] = grid_off;
+    state.data[3] = wrap_pend ? 1 : 0;
+    state.data[4] = sb_head;
+    state.data[5] = sb_count;
+    state.data[9] = (int32_t)tmpl.fg;
+    state.data[10] = (int32_t)tmpl.bg;
+    state.data[11] = (int32_t)tmpl.attrs;
+    state.data[12] = (int32_t)tmpl.ul_style;
+    state.data[13] = (int32_t)tmpl.ul_color;
+
+    return i - pos;
 }
 
 int32_t goosy_cells_write_ascii(goosy_cells_slice_t cells, int64_t row_base, int32_t cx,

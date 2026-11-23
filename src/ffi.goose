@@ -142,3 +142,4 @@ extern fn cmdline_rows() -> i32 = "goosy_cmdline_rows";
 extern fn cmdline_has_custom_size() -> i32 = "goosy_cmdline_has_custom_size";
 extern fn cmdline_hold() -> i32 = "goosy_cmdline_hold";
 extern fn cmdline_renderer() -> i32 = "goosy_cmdline_renderer";
+extern fn fast_sgr(data: const u8[:], pos: i64, out_state: u32[:], ansi_pal: const u32[:]) -> i32 = "goosy_fast_sgr";
