@@ -214,8 +214,32 @@ fn main() {
     while running {
         if ffi::wl_dispatch_pending() < 0 || ffi::wl_flush() < 0 { break; }
 
-        let ready = ffi::poll_wait(-1);
+        let sc_cur = ffi::wl_scale();
+        let is_csd_cur = cfg.title_bar && (ffi::wl_is_csd() != 0);
+        let title_h_cur = if is_csd_cur { cfg.title_bar_height * sc_cur } else { 0 };
+        let pad_px_cur = cfg.padding * sc_cur;
+        let win_h_cur = ffi::wl_height() * sc_cur;
+        let is_autoscroll = drag_left && !scr.alt_screen && scr.sb_count > 0 &&
+                           (ptr_y * sc_cur < title_h_cur + pad_px_cur || ptr_y * sc_cur > win_h_cur - pad_px_cur);
+        let poll_timeout: i32 = if is_autoscroll { 35 } else { -1 };
+
+        let ready = ffi::poll_wait(poll_timeout);
         if ready == ffi::POLL_ERR { break; }
+
+        if ready == ffi::POLL_TIMEOUT && is_autoscroll {
+            let c, r = px_to_cell(ptr_x, ptr_y, sc_cur, cfg.padding,
+                                  ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h_cur);
+            if ptr_y * sc_cur < title_h_cur + pad_px_cur {
+                screen::scroll_viewport(scr, 1);
+                scr.sel_x1 = c;
+                scr.sel_y1 = screen::visible_row_to_abs(scr, 0);
+            } else if ptr_y * sc_cur > win_h_cur - pad_px_cur {
+                screen::scroll_viewport(scr, -1);
+                scr.sel_x1 = c;
+                scr.sel_y1 = screen::visible_row_to_abs(scr, scr.rows - 1);
+            }
+            screen::mark_all_dirty(scr);
+        }
 
         if (ready & ffi::POLL_WAYLAND) != 0 {
             if ffi::wl_prepare_and_read() < 0 { break; }
@@ -398,27 +422,44 @@ fn main() {
                 if drag_left {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
                                           ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
+                    let abs_r = screen::visible_row_to_abs(scr, r);
                     if scr.sel_mode == screen::SEL_LINE {
                         scr.sel_x0 = 0; scr.sel_x1 = scr.cols - 1;
-                        scr.sel_y1 = r;
+                        scr.sel_y1 = abs_r;
                     } else if scr.sel_mode == screen::SEL_WORD {
                         let cur = screen::visible_cell(scr, c, r);
                         let sep = screen::is_word_sep(cur.cp, false);
                         var c_word = c;
-                        if r < scr.sel_y0 || (r == scr.sel_y0 && c < scr.sel_x0) {
+                        if abs_r < scr.sel_y0 || (abs_r == scr.sel_y0 && c < scr.sel_x0) {
                             while c_word > 0 && screen::is_word_sep(screen::visible_cell(scr, c_word - 1, r).cp, false) == sep {
                                 c_word -= 1;
                             }
-                            scr.sel_x1 = c_word; scr.sel_y1 = r;
+                            scr.sel_x1 = c_word; scr.sel_y1 = abs_r;
                         } else {
                             while c_word < scr.cols - 1 && screen::is_word_sep(screen::visible_cell(scr, c_word + 1, r).cp, false) == sep {
                                 c_word += 1;
                             }
-                            scr.sel_x1 = c_word; scr.sel_y1 = r;
+                            scr.sel_x1 = c_word; scr.sel_y1 = abs_r;
                         }
                     } else {
-                        scr.sel_x1 = c; scr.sel_y1 = r;
+                        scr.sel_x1 = c; scr.sel_y1 = abs_r;
                     }
+
+                    // Auto-scroll when dragging near or beyond the top / bottom edge
+                    let pad_px = cfg.padding * sc;
+                    let win_h = ffi::wl_height() * sc;
+                    let content_top = title_h + pad_px;
+                    let content_bottom = win_h - pad_px;
+                    if !scr.alt_screen && scr.sb_count > 0 {
+                        if ptr_y * sc < content_top {
+                            screen::scroll_viewport(scr, 1);
+                            scr.sel_y1 = screen::visible_row_to_abs(scr, 0);
+                        } else if ptr_y * sc > content_bottom {
+                            screen::scroll_viewport(scr, -1);
+                            scr.sel_y1 = screen::visible_row_to_abs(scr, scr.rows - 1);
+                        }
+                    }
+
                     screen::mark_all_dirty(scr);
                 } else if mouse_tracking_press {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
@@ -431,8 +472,10 @@ fn main() {
                         drag_left = true;
                         scr.sel_active = true;
                         scr.sel_mode = screen::SEL_CHAR;
-                        scr.sel_x0 = mouse_press_c; scr.sel_y0 = mouse_press_r;
-                        scr.sel_x1 = c; scr.sel_y1 = r;
+                        let abs_press_r = screen::visible_row_to_abs(scr, mouse_press_r);
+                        let abs_r = screen::visible_row_to_abs(scr, r);
+                        scr.sel_x0 = mouse_press_c; scr.sel_y0 = abs_press_r;
+                        scr.sel_x1 = c; scr.sel_y1 = abs_r;
                         screen::mark_all_dirty(scr);
                     }
                 } else if drag_right {
@@ -563,8 +606,9 @@ fn main() {
                                     drag_left = true;
                                     scr.sel_active = true;
                                     scr.sel_mode = if ctrl { screen::SEL_BLOCK } else { screen::SEL_CHAR };
-                                    scr.sel_x0 = c; scr.sel_y0 = r;
-                                    scr.sel_x1 = c; scr.sel_y1 = r;
+                                    let abs_r = screen::visible_row_to_abs(scr, r);
+                                    scr.sel_x0 = c; scr.sel_y0 = abs_r;
+                                    scr.sel_x1 = c; scr.sel_y1 = abs_r;
                                     screen::mark_all_dirty(scr);
                                 } else {
                                     // Client mouse tracking active (agy, codex, etc.):
@@ -648,7 +692,7 @@ fn main() {
 
                 if ctrl {
                     adjust_font(scr, cfg, font_size, base_font_size, if delta < 0 { 1 } else { -1 });
-                } else if scr.mouse_mode != 0 {
+                } else if !drag_left && scr.mouse_mode != 0 {
                     let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
                                           ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
                     let mbtn: i32 = if delta < 0 { 64 } else { 65 };
@@ -656,6 +700,13 @@ fn main() {
                     if mouse_out.len > 0 { ffi::pty_write(mouse_out); }
                 } else {
                     screen::scroll_viewport(scr, if delta < 0 { 3 } else { -3 });
+                    if drag_left {
+                        let c, r = px_to_cell(ptr_x, ptr_y, sc, cfg.padding,
+                                              ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
+                        scr.sel_x1 = c;
+                        scr.sel_y1 = screen::visible_row_to_abs(scr, r);
+                    }
+                    screen::mark_all_dirty(scr);
                 }
             } else if ev == ffi::EV_TOUCH_DOWN {
                 touch_active    = true;
@@ -678,12 +729,14 @@ fn main() {
                                                 ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
                         scr.sel_active = true;
                         scr.sel_mode = screen::SEL_CHAR;
-                        scr.sel_x0 = c0; scr.sel_y0 = r0;
+                        let abs_r0 = screen::visible_row_to_abs(scr, r0);
+                        scr.sel_x0 = c0; scr.sel_y0 = abs_r0;
                     }
                     if touch_selecting {
                         let c1, r1 = px_to_cell(tx, ty, sc, cfg.padding,
                                                 ffi::font_cell_width(), ffi::font_cell_height(), scr.cols, scr.rows, title_h);
-                        scr.sel_x1 = c1; scr.sel_y1 = r1;
+                        let abs_r1 = screen::visible_row_to_abs(scr, r1);
+                        scr.sel_x1 = c1; scr.sel_y1 = abs_r1;
                         screen::mark_all_dirty(scr);
                     } else {
                         let dy = ty - touch_last_y;

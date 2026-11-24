@@ -488,6 +488,67 @@ fn test_command_output_selection_and_combining() {
     assert(sel_out.len > 0);
 }
 
+fn test_selection_scroll_and_multiscreen() {
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 20, 4, pal.fg, pal.bg, 20, 0);
+    var par = parser::Parser { .. };
+
+    // Emit 10 lines of text -> 6 lines in scrollback, 4 lines visible
+    parser::feed_slice(par, scr, pal, "line0\r\nline1\r\nline2\r\nline3\r\nline4\r\nline5\r\nline6\r\nline7\r\nline8\r\nline9");
+    assert(scr.sb_count == 6);
+
+    // Initial visible screen has line6 (row 0), line7 (row 1), line8 (row 2), line9 (row 3)
+    // Select "line7" on visible row 1:
+    let abs_r1 = screen::visible_row_to_abs(scr, 1);
+    assert(abs_r1 == 7); // line7 is abs_line 7
+    scr.sel_active = true;
+    scr.sel_mode = screen::SEL_CHAR;
+    scr.sel_x0 = 0; scr.sel_y0 = abs_r1;
+    scr.sel_x1 = 4; scr.sel_y1 = abs_r1;
+
+    // Verify cell (0, 1) is selected:
+    assert(screen::is_selected(scr, 0, 1));
+    assert(screen::is_selected(scr, 4, 1));
+    assert(!screen::is_selected(scr, 0, 0));
+
+    // Scroll viewport up by 2:
+    screen::scroll_viewport(scr, 2);
+    assert(scr.view_offset == 2);
+    // Now visible row 3 has line7 (row 3 + (6 - 2) = 7)!
+    assert(screen::is_selected(scr, 0, 3));
+    assert(screen::is_selected(scr, 4, 3));
+    assert(!screen::is_selected(scr, 0, 1)); // row 1 is now line5, not selected!
+
+    // Multi-screen selection extraction across scrollback and live screen:
+    // Select from line2 (in scrollback) to line8 (in live screen)
+    scr.sel_x0 = 0; scr.sel_y0 = 2;
+    scr.sel_x1 = 4; scr.sel_y1 = 8;
+    var sel_out: u8[>..] = [];
+    screen::extract_selection(scr, sel_out);
+    assert(sel_out.len > 0);
+
+    // Alt-screen rectangular resize test:
+    // Switch to alt screen
+    parser::feed_slice(par, scr, pal, "\x1b[?1049h");
+    assert(scr.alt_screen);
+    parser::feed_slice(par, scr, pal, "\x1b[1;1HTOPLEFT\x1b[4;1HBOTTOM");
+    let c_top = screen::visible_cell(scr, 0, 0);
+    assert(c_top.cp == 'T');
+
+    // Maximize / resize alt-screen:
+    screen::resize(scr, 60, 12);
+    assert(scr.cols == 60 && scr.rows == 12);
+    let c_top_after = screen::visible_cell(scr, 0, 0);
+    assert(c_top_after.cp == 'T'); // text preserved without reflow corruption
+
+    // Exit alt screen
+    parser::feed_slice(par, scr, pal, "\x1b[?1049l");
+    assert(!scr.alt_screen);
+    // Primary scrollback must remain intact
+    assert(scr.sb_count == 6);
+}
+
 fn main() {
     test_utf8_decoding();
     test_osc7_and_osc133_prompt_jumps();
@@ -501,5 +562,6 @@ fn main() {
     test_crlf_paste_and_resize_preservation();
     test_kitty_keyboard_protocol();
     test_command_output_selection_and_combining();
+    test_selection_scroll_and_multiscreen();
     print("goosy: all Goose unit tests passed");
 }

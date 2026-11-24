@@ -100,15 +100,12 @@ fn apply_search_highlight(m: ModeState&, s: screen::Screen&) {
         if target_off > s.sb_count { target_off = s.sb_count; }
         s.view_offset = target_off;
     }
-    let vis_row = m.search_abs_line - (s.sb_count - s.view_offset);
-    if vis_row >= 0 && vis_row < s.rows {
-        s.sel_active = true;
-        s.sel_mode = screen::SEL_CHAR;
-        s.sel_x0 = m.search_col;
-        s.sel_y0 = vis_row;
-        s.sel_x1 = m.search_col + m.search_len - 1;
-        s.sel_y1 = vis_row;
-    }
+    s.sel_active = true;
+    s.sel_mode = screen::SEL_CHAR;
+    s.sel_x0 = m.search_col;
+    s.sel_y0 = m.search_abs_line;
+    s.sel_x1 = m.search_col + m.search_len - 1;
+    s.sel_y1 = m.search_abs_line;
     screen::mark_all_dirty(s);
 }
 

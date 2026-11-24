@@ -18,7 +18,8 @@
 #include <string.h>
 
 #define MAX_VK_QUADS 131072
-#define VK_ATLAS_SIZE 1024
+#define VK_ATLAS_SIZE 2048
+#define MAX_VK_ATLAS_SLOTS 8192
 
 static uint32_t g_vk_bg_rgb = 0;
 
@@ -96,7 +97,7 @@ static int32_t g_cur_scale = 1;
 static int32_t g_quad_count = 0;
 static uint32_t g_active_image_idx = 0;
 
-static vk_atlas_slot_t g_atlas_slots[2048];
+static vk_atlas_slot_t g_atlas_slots[MAX_VK_ATLAS_SLOTS];
 static int32_t         g_atlas_slot_count = 0;
 static int32_t         g_atlas_cur_x = 1;
 static int32_t         g_atlas_cur_y = 1;
@@ -128,10 +129,28 @@ static VkShaderModule create_shader_module(const uint32_t *code, size_t size_byt
 
 static bool create_swapchain_and_views(void) {
     VkSurfaceCapabilitiesKHR caps;
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk_gpu, g_vk_surface, &caps);
+    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk_gpu, g_vk_surface, &caps) != VK_SUCCESS) {
+        return false;
+    }
 
-    g_vk_extent.width = (uint32_t)(g_cur_w * g_cur_scale);
-    g_vk_extent.height = (uint32_t)(g_cur_h * g_cur_scale);
+    uint32_t req_w = (uint32_t)(g_cur_w * g_cur_scale);
+    uint32_t req_h = (uint32_t)(g_cur_h * g_cur_scale);
+
+    if (caps.currentExtent.width != 0xFFFFFFFFU && caps.currentExtent.width > 0) {
+        g_vk_extent.width = caps.currentExtent.width;
+    } else {
+        if (req_w < caps.minImageExtent.width) req_w = caps.minImageExtent.width;
+        if (req_w > caps.maxImageExtent.width) req_w = caps.maxImageExtent.width;
+        g_vk_extent.width = req_w;
+    }
+
+    if (caps.currentExtent.height != 0xFFFFFFFFU && caps.currentExtent.height > 0) {
+        g_vk_extent.height = caps.currentExtent.height;
+    } else {
+        if (req_h < caps.minImageExtent.height) req_h = caps.minImageExtent.height;
+        if (req_h > caps.maxImageExtent.height) req_h = caps.maxImageExtent.height;
+        g_vk_extent.height = req_h;
+    }
 
     uint32_t desired_images = caps.minImageCount + 1;
     if (desired_images < caps.minImageCount) desired_images = caps.minImageCount;
@@ -483,6 +502,16 @@ static bool vk_init(void) {
         .pAttachments = &cbas
     };
 
+    VkDynamicState dyn_states[] = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+    VkPipelineDynamicStateCreateInfo pdsi = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = 2,
+        .pDynamicStates = dyn_states
+    };
+
     VkGraphicsPipelineCreateInfo gpci = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = 2, .pStages = stages,
@@ -492,6 +521,7 @@ static bool vk_init(void) {
         .pRasterizationState = &prsi,
         .pMultisampleState = &pmssi,
         .pColorBlendState = &pcbsi,
+        .pDynamicState = &pdsi,
         .layout = g_vk_pipe_layout,
         .renderPass = g_vk_render_pass,
         .subpass = 0
@@ -704,7 +734,7 @@ static vk_atlas_slot_t *vk_get_or_upload_glyph(uint32_t cp, uint8_t style) {
         g_atlas_cur_y = 1;
         g_atlas_row_h = 0;
     }
-    if (g_atlas_slot_count >= 2048) {
+    if (g_atlas_slot_count >= MAX_VK_ATLAS_SLOTS) {
         g_atlas_slot_count = 0;
     }
 
@@ -747,16 +777,20 @@ static vk_atlas_slot_t *vk_get_or_upload_glyph(uint32_t cp, uint8_t style) {
         };
         vkBeginCommandBuffer(cb, &cbbi);
 
+        static bool g_atlas_layout_initialized = false;
         VkImageMemoryBarrier imb = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = 0,
+            .srcAccessMask = g_atlas_layout_initialized ? VK_ACCESS_SHADER_READ_BIT : 0,
             .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .oldLayout = g_atlas_layout_initialized ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .image = g_vk_atlas_img,
             .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
         };
-        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &imb);
+        vkCmdPipelineBarrier(cb,
+                             g_atlas_layout_initialized ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &imb);
+        g_atlas_layout_initialized = true;
 
         VkBufferImageCopy bic = {
             .bufferOffset = 0,
@@ -1076,6 +1110,8 @@ static void vk_damage(int32_t x, int32_t y, int32_t w, int32_t h) {
     (void)x; (void)y; (void)w; (void)h;
 }
 
+static void vk_resize(int32_t width_px, int32_t height_px, int32_t scale);
+
 static int32_t vk_begin(uint32_t bg_rgb) {
     if (!g_vk_device || !g_vk_swapchain) return -1;
 
@@ -1083,6 +1119,10 @@ static int32_t vk_begin(uint32_t bg_rgb) {
     vkResetFences(g_vk_device, 1, &g_vk_fence);
 
     VkResult res = vkAcquireNextImageKHR(g_vk_device, g_vk_swapchain, UINT64_MAX, g_vk_sem_available, VK_NULL_HANDLE, &g_active_image_idx);
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
+        vk_resize(g_cur_w, g_cur_h, g_cur_scale);
+        res = vkAcquireNextImageKHR(g_vk_device, g_vk_swapchain, UINT64_MAX, g_vk_sem_available, VK_NULL_HANDLE, &g_active_image_idx);
+    }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
         return -1;
     }
@@ -1124,6 +1164,11 @@ static void vk_end(bool request_frame_cb) {
     };
     vkCmdBeginRenderPass(cb, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 
+    VkViewport vp = { 0.0f, 0.0f, (float)g_vk_extent.width, (float)g_vk_extent.height, 0.0f, 1.0f };
+    VkRect2D sc = { {0, 0}, g_vk_extent };
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &sc);
+
     if (g_quad_count > 0) {
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_vk_pipeline);
 
@@ -1163,7 +1208,10 @@ static void vk_end(bool request_frame_cb) {
         .pSwapchains = &g_vk_swapchain,
         .pImageIndices = &g_active_image_idx
     };
-    vkQueuePresentKHR(g_vk_queue, &pi);
+    VkResult pres_res = vkQueuePresentKHR(g_vk_queue, &pi);
+    if (pres_res == VK_ERROR_OUT_OF_DATE_KHR || pres_res == VK_SUBOPTIMAL_KHR) {
+        vk_resize(g_cur_w, g_cur_h, g_cur_scale);
+    }
     if (request_frame_cb) {
         goosy_wl_request_frame_callback();
     }

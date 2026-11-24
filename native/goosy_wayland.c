@@ -166,6 +166,7 @@ static int create_shm_buffer(struct goosy_shm_buffer *b, int32_t w, int32_t h) {
 
     uint32_t *pixels = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (pixels == MAP_FAILED) { close(fd); return -1; }
+    memset(pixels, 0, size);
 
     struct wl_shm_pool *pool = wl_shm_create_pool(g_shm, fd, (int32_t)size);
     close(fd);
@@ -237,7 +238,11 @@ void goosy_wl_commit_damage(struct goosy_shm_buffer *buf,
         wl_surface_set_buffer_scale(g_surface, g_scale);
     }
     wl_surface_attach(g_surface, (struct wl_buffer *)buf->wl_buffer, 0, 0);
-    if (w > 0 && h > 0) wl_surface_damage_buffer(g_surface, x, y, w, h);
+    if (w > 0 && h > 0) {
+        wl_surface_damage_buffer(g_surface, x, y, w, h);
+    } else {
+        wl_surface_damage_buffer(g_surface, 0, 0, buf->width, buf->height);
+    }
     if (request_frame_cb && !g_frame_cb) {
         g_frame_cb = wl_surface_frame(g_surface);
         wl_callback_add_listener(g_frame_cb, &g_frame_listener, NULL);

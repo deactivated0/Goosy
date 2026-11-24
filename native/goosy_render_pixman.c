@@ -619,12 +619,13 @@ static void pixman_end(bool request_frame_cb) {
         g_cur_img = NULL;
     }
     if (g_cur_buf) {
-        if (g_has_dmg) {
-            goosy_wl_commit_damage(
-                g_cur_buf, g_dmg_x0, g_dmg_y0,
-                g_dmg_x1 - g_dmg_x0, g_dmg_y1 - g_dmg_y0,
-                request_frame_cb);
-        }
+        int32_t dx = g_has_dmg ? g_dmg_x0 : 0;
+        int32_t dy = g_has_dmg ? g_dmg_y0 : 0;
+        int32_t dw = g_has_dmg ? (g_dmg_x1 - g_dmg_x0) : g_cur_buf->width;
+        int32_t dh = g_has_dmg ? (g_dmg_y1 - g_dmg_y0) : g_cur_buf->height;
+        goosy_wl_commit_damage(
+            g_cur_buf, dx, dy, dw, dh,
+            request_frame_cb);
         g_cur_buf = NULL;
     }
     g_cur_pixels = NULL;
@@ -643,7 +644,9 @@ static void pixman_cleanup(void) {
 }
 
 static void pixman_resize(int32_t width_px, int32_t height_px, int32_t scale) {
-    (void)width_px; (void)height_px; (void)scale;
+    g_cur_w = width_px;
+    g_cur_h = height_px;
+    (void)scale;
 }
 
 goosy_renderer_backend_t g_backend_pixman = {

@@ -19,7 +19,8 @@
 #include <string.h>
 
 #define MAX_GL_QUADS 131072
-#define GL_ATLAS_SIZE 1024
+#define GL_ATLAS_SIZE 2048
+#define MAX_GL_ATLAS_SLOTS 8192
 
 typedef struct {
     float x, y;
@@ -63,7 +64,7 @@ static int32_t g_cur_h     = 600;
 static int32_t g_cur_scale = 1;
 
 /* Simple glyph atlas packing */
-static gl_atlas_slot_t g_atlas_slots[2048];
+static gl_atlas_slot_t g_atlas_slots[MAX_GL_ATLAS_SLOTS];
 static int32_t         g_atlas_slot_count = 0;
 static int32_t         g_atlas_cur_x = 1;
 static int32_t         g_atlas_cur_y = 1;
@@ -277,7 +278,7 @@ static gl_atlas_slot_t *gl_get_or_upload_glyph(uint32_t cp, uint8_t style) {
         g_atlas_cur_y = 1;
         g_atlas_row_h = 0;
     }
-    if (g_atlas_slot_count >= 2048) {
+    if (g_atlas_slot_count >= MAX_GL_ATLAS_SLOTS) {
         g_atlas_slot_count = 0;
     }
 

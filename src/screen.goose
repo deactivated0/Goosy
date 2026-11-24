@@ -395,6 +395,13 @@ fn push_scrollback_row(s: Screen&, row: i32) {
         s.sb_head += 1;
         if s.sb_head >= s.sb_cap_lines { s.sb_head = 0; }
         ffi::image_scroll(1);
+        if s.sel_active {
+            s.sel_y0 -= 1;
+            s.sel_y1 -= 1;
+            if s.sel_y0 < 0 && s.sel_y1 < 0 {
+                s.sel_active = false;
+            }
+        }
     } else {
         s.sb_count += 1;
     }
@@ -443,7 +450,7 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
         for r in 0..s.rows {
             if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
         }
-        if s.sel_active {
+        if s.alt_screen && s.sel_active {
             s.sel_y0 -= count;
             s.sel_y1 -= count;
             if s.sel_y0 < 0 && s.sel_y1 < 0 {
@@ -454,9 +461,6 @@ fn scroll_up(s: Screen&, top: i32, bottom: i32, n: i32) {
     }
 
     normalize_grid(s);
-    if s.sel_active {
-        s.sel_active = false;
-    }
     s.full_redraw_frames = 2;
     let ec = erase_cell(s);
     screen_scroll_up(s.cells[..], s.cols, top, bottom, count,
@@ -483,7 +487,7 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
         for r in 0..s.rows {
             if r < s.dirty_rows.len { s.dirty_rows[r] = 2; }
         }
-        if s.sel_active {
+        if s.alt_screen && s.sel_active {
             s.sel_y0 += count;
             s.sel_y1 += count;
             if s.sel_y0 >= s.rows && s.sel_y1 >= s.rows {
@@ -494,9 +498,6 @@ fn scroll_down(s: Screen&, top: i32, bottom: i32, n: i32) {
     }
 
     normalize_grid(s);
-    if s.sel_active {
-        s.sel_active = false;
-    }
     s.full_redraw_frames = 2;
     let row_count = bottom - count + 1 - top;
     cells_scroll_down(s.cells[..], s.cols, top, bottom, count);
@@ -806,6 +807,45 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
 
     let b = blank_cell(s);
 
+    if s.alt_screen {
+        let total = (nc as i64) * nr;
+        var next_cells: Cell[>..] = [];
+        for _ in 0..total { next_cells.push(b); }
+        let min_r = if nr < s.rows { nr } else { s.rows };
+        let min_c = if nc < s.cols { nc } else { s.cols };
+        for r in 0..min_r {
+            let src = (r as i64) * s.cols;
+            let dst = (r as i64) * nc;
+            for c in 0..min_c { next_cells[dst + c] = s.cells[src + c]; }
+        }
+        s.cells.clear();
+        for i in 0..total { s.cells.push(next_cells[i]); }
+
+        var next_alt: Cell[>..] = [];
+        for _ in 0..total { next_alt.push(b); }
+        for r in 0..min_r {
+            let src = (r as i64) * s.cols;
+            let dst = (r as i64) * nc;
+            for c in 0..min_c {
+                if src + c < s.alt_cells.len {
+                    next_alt[dst + c] = s.alt_cells[src + c];
+                }
+            }
+        }
+        s.alt_cells.clear();
+        for i in 0..total { s.alt_cells.push(next_alt[i]); }
+
+        s.cols = nc; s.rows = nr;
+        s.scroll_top = 0; s.scroll_bottom = nr - 1;
+        clamp_cursor(s);
+        reset_tabs(s);
+        s.dirty_rows.clear();
+        for _ in 0..nr { s.dirty_rows.push(2); }
+        s.sel_active = false;
+        s.full_redraw_frames = 2;
+        return;
+    }
+
     if nc == s.cols {
         var next_cells: Cell[>..] = [];
         let total = (nc as i64) * nr;
@@ -965,6 +1005,8 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
         s.dirty_rows.push(2);
     }
     for _ in 0..((nc as i64) * nr) { s.cells.push(b); }
+    s.alt_cells.clear();
+    for _ in 0..((nc as i64) * nr) { s.alt_cells.push(b); }
 
     let live_rows_to_copy = if total_reflowed - live_start_row < nr { total_reflowed - live_start_row } else { nr };
     for r in 0..live_rows_to_copy {
@@ -1118,14 +1160,22 @@ fn select_last_command_output(s: Screen&) -> bool {
     s.sel_active = true;
     s.sel_mode = SEL_LINE;
     s.sel_x0 = 0;
-    s.sel_y0 = start_line - top_visible;
+    s.sel_y0 = start_line;
     s.sel_x1 = s.cols - 1;
-    s.sel_y1 = end_line - top_visible;
+    s.sel_y1 = end_line;
     if s.sel_y1 < s.sel_y0 {
         s.sel_y1 = s.sel_y0;
     }
     mark_all_dirty(s);
     return true;
+}
+
+fn visible_row_to_abs(s: Screen&, row: i32) -> i32 {
+    return if s.alt_screen { row } else { s.sb_count - s.view_offset + row };
+}
+
+fn abs_to_visible_row(s: Screen&, abs_line: i32) -> i32 {
+    return if s.alt_screen { abs_line } else { abs_line - (s.sb_count - s.view_offset) };
 }
 
 fn visible_cell(s: Screen&, col: i32, row: i32) -> Cell {
@@ -1152,38 +1202,41 @@ fn is_word_sep(cp: u32, whitespace_only: bool) -> bool {
 }
 
 fn select_word(s: Screen&, col: i32, row: i32, whitespace_only: bool) {
-    let cur = visible_cell(s, col, row);
+    let abs_y = visible_row_to_abs(s, row);
+    let cur = history_cell(s, abs_y, col);
     let sep = is_word_sep(cur.cp, whitespace_only);
     var c0 = col;
-    while c0 > 0 && is_word_sep(visible_cell(s, c0 - 1, row).cp, whitespace_only) == sep {
+    while c0 > 0 && is_word_sep(history_cell(s, abs_y, c0 - 1).cp, whitespace_only) == sep {
         c0 -= 1;
     }
     var c1 = col;
-    while c1 < s.cols - 1 && is_word_sep(visible_cell(s, c1 + 1, row).cp, whitespace_only) == sep {
+    while c1 < s.cols - 1 && is_word_sep(history_cell(s, abs_y, c1 + 1).cp, whitespace_only) == sep {
         c1 += 1;
     }
     s.sel_active = true;
     s.sel_mode = SEL_WORD;
-    s.sel_x0 = c0; s.sel_y0 = row;
-    s.sel_x1 = c1; s.sel_y1 = row;
+    s.sel_x0 = c0; s.sel_y0 = abs_y;
+    s.sel_x1 = c1; s.sel_y1 = abs_y;
     mark_all_dirty(s);
 }
 
 fn select_line(s: Screen&, row: i32) {
+    let abs_y = visible_row_to_abs(s, row);
     s.sel_active = true;
     s.sel_mode = SEL_LINE;
-    s.sel_x0 = 0; s.sel_y0 = row;
-    s.sel_x1 = s.cols - 1; s.sel_y1 = row;
+    s.sel_x0 = 0; s.sel_y0 = abs_y;
+    s.sel_x1 = s.cols - 1; s.sel_y1 = abs_y;
     mark_all_dirty(s);
 }
 
 // Triple-click: select inside enclosing quotes (", ', `), or entire row if not inside quotes.
 fn select_quote_or_line(s: Screen&, col: i32, row: i32) {
+    let abs_y = visible_row_to_abs(s, row);
     var left_q: i32 = -1;
     var qchar: u32 = 0;
     var c = col;
     while c >= 0 {
-        let cp = visible_cell(s, c, row).cp;
+        let cp = history_cell(s, abs_y, c).cp;
         if cp == '"' || cp == '\'' || cp == '`' {
             left_q = c;
             qchar = cp;
@@ -1195,7 +1248,7 @@ fn select_quote_or_line(s: Screen&, col: i32, row: i32) {
         var right_q: i32 = -1;
         var c2 = col + 1;
         while c2 < s.cols {
-            if visible_cell(s, c2, row).cp == qchar {
+            if history_cell(s, abs_y, c2).cp == qchar {
                 right_q = c2;
                 break;
             }
@@ -1204,8 +1257,8 @@ fn select_quote_or_line(s: Screen&, col: i32, row: i32) {
         if right_q > left_q + 1 {
             s.sel_active = true;
             s.sel_mode = SEL_QUOTE;
-            s.sel_x0 = left_q + 1; s.sel_y0 = row;
-            s.sel_x1 = right_q - 1; s.sel_y1 = row;
+            s.sel_x0 = left_q + 1; s.sel_y0 = abs_y;
+            s.sel_x1 = right_q - 1; s.sel_y1 = abs_y;
             mark_all_dirty(s);
             return;
         }
@@ -1215,11 +1268,12 @@ fn select_quote_or_line(s: Screen&, col: i32, row: i32) {
 
 // Right-click / Ctrl+Right-click: extend current selection
 fn extend_selection(s: Screen&, col: i32, row: i32, force_char: bool) {
+    let abs_y = visible_row_to_abs(s, row);
     if !s.sel_active {
         s.sel_active = true;
         s.sel_mode = SEL_CHAR;
-        s.sel_x0 = col; s.sel_y0 = row;
-        s.sel_x1 = col; s.sel_y1 = row;
+        s.sel_x0 = col; s.sel_y0 = abs_y;
+        s.sel_x1 = col; s.sel_y1 = abs_y;
         mark_all_dirty(s);
         return;
     }
@@ -1227,23 +1281,24 @@ fn extend_selection(s: Screen&, col: i32, row: i32, force_char: bool) {
         s.sel_mode = SEL_CHAR;
     }
     if s.sel_mode == SEL_LINE && !force_char {
-        if row < s.sel_y0 { s.sel_y0 = row; s.sel_x0 = 0; }
-        else { s.sel_y1 = row; s.sel_x1 = s.cols - 1; }
+        if abs_y < s.sel_y0 { s.sel_y0 = abs_y; s.sel_x0 = 0; }
+        else { s.sel_y1 = abs_y; s.sel_x1 = s.cols - 1; }
     } else {
         s.sel_x1 = col;
-        s.sel_y1 = row;
+        s.sel_y1 = abs_y;
     }
     mark_all_dirty(s);
 }
 
 fn is_selected(s: Screen&, col: i32, row: i32) -> bool {
     if !s.sel_active { return false; }
+    let abs_row = visible_row_to_abs(s, row);
     if s.sel_mode == SEL_BLOCK {
         let min_x = if s.sel_x0 < s.sel_x1 { s.sel_x0 } else { s.sel_x1 };
         let max_x = if s.sel_x0 > s.sel_x1 { s.sel_x0 } else { s.sel_x1 };
         let min_y = if s.sel_y0 < s.sel_y1 { s.sel_y0 } else { s.sel_y1 };
         let max_y = if s.sel_y0 > s.sel_y1 { s.sel_y0 } else { s.sel_y1 };
-        return col >= min_x && col <= max_x && row >= min_y && row <= max_y;
+        return col >= min_x && col <= max_x && abs_row >= min_y && abs_row <= max_y;
     }
     var y0 = s.sel_y0; var x0 = s.sel_x0;
     var y1 = s.sel_y1; var x1 = s.sel_x1;
@@ -1251,9 +1306,9 @@ fn is_selected(s: Screen&, col: i32, row: i32) -> bool {
         let ty = y0; y0 = y1; y1 = ty;
         let tx = x0; x0 = x1; x1 = tx;
     }
-    if row < y0 || row > y1 { return false; }
-    if row == y0 && col < x0 { return false; }
-    if row == y1 && col > x1 { return false; }
+    if abs_row < y0 || abs_row > y1 { return false; }
+    if abs_row == y0 && col < x0 { return false; }
+    if abs_row == y1 && col > x1 { return false; }
     return true;
 }
 
@@ -1263,6 +1318,15 @@ fn extract_selection(s: Screen&, out: u8[>..]&) {
 
     var y0 = s.sel_y0; var x0 = s.sel_x0;
     var y1 = s.sel_y1; var x1 = s.sel_x1;
+    if y0 > y1 || (y0 == y1 && x0 > x1) {
+        let ty = y0; y0 = y1; y1 = ty;
+        let tx = x0; x0 = x1; x1 = tx;
+    }
+    let total_lines = total_history_lines(s);
+    if y0 < 0 { y0 = 0; }
+    if y1 >= total_lines { y1 = total_lines - 1; }
+    if y0 > y1 { return; }
+
     if s.sel_mode == SEL_BLOCK {
         let min_x = if x0 < x1 { x0 } else { x1 };
         let max_x = if x0 > x1 { x0 } else { x1 };
@@ -1271,12 +1335,12 @@ fn extract_selection(s: Screen&, out: u8[>..]&) {
         for r in min_y..(max_y + 1) {
             var last_ns = min_x - 1;
             for c in min_x..(max_x + 1) {
-                let cell = visible_cell(s, c, r);
+                let cell = history_cell(s, r, c);
                 if cell.flags == 0 && cell.cp != 0x20 && cell.cp != 0 { last_ns = c; }
             }
             if last_ns >= min_x {
                 for c in min_x..(last_ns + 1) {
-                    let cell = visible_cell(s, c, r);
+                    let cell = history_cell(s, r, c);
                     if cell.flags == CELL_WIDE_CONT { continue; }
                     utf8::encode_to(out, if cell.cp == 0 { 0x20 } else { cell.cp });
                 }
@@ -1286,29 +1350,36 @@ fn extract_selection(s: Screen&, out: u8[>..]&) {
         return;
     }
 
-    if y0 > y1 || (y0 == y1 && x0 > x1) {
-        let ty = y0; y0 = y1; y1 = ty;
-        let tx = x0; x0 = x1; x1 = tx;
-    }
-    if y0 < 0 { y0 = 0; }
-    if y1 >= s.rows { y1 = s.rows - 1; }
-
     for r in y0..(y1 + 1) {
         let c_start = if r == y0 { x0 } else { 0 };
         let c_end   = if r == y1 { x1 } else { s.cols - 1 };
         var last_nonspace = c_start - 1;
         for c in c_start..(c_end + 1) {
-            let cell = visible_cell(s, c, r);
+            let cell = history_cell(s, r, c);
             if cell.flags == 0 && cell.cp != 0x20 && cell.cp != 0 { last_nonspace = c; }
         }
         if last_nonspace >= c_start {
             for c in c_start..(last_nonspace + 1) {
-                let cell = visible_cell(s, c, r);
+                let cell = history_cell(s, r, c);
                 if cell.flags == CELL_WIDE_CONT { continue; }
                 utf8::encode_to(out, if cell.cp == 0 { 0x20 } else { cell.cp });
                 if cell.combining != 0 { utf8::encode_to(out, cell.combining); }
             }
         }
-        if r < y1 { out.push('\n'); }
+        if r < y1 {
+            let is_wrapped = if s.alt_screen {
+                false
+            } else if r < s.sb_count {
+                let lidx = (s.sb_head + r) % s.sb_cap_lines;
+                lidx < s.sb_wrapped_rows.len && s.sb_wrapped_rows[lidx] != 0
+            } else {
+                let lr = r - s.sb_count;
+                let pr = phys_row(s, lr);
+                pr < s.wrapped_rows.len && s.wrapped_rows[pr] != 0
+            };
+            if !is_wrapped {
+                out.push('\n');
+            }
+        }
     }
 }
