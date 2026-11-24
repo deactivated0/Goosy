@@ -839,67 +839,54 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
         s.scroll_top = 0; s.scroll_bottom = nr - 1;
         clamp_cursor(s);
         reset_tabs(s);
-        s.dirty_rows.clear();
-        for _ in 0..nr { s.dirty_rows.push(2); }
-        s.sel_active = false;
-        s.full_redraw_frames = 2;
-        return;
-    }
-
-    if nc == s.cols {
-        var next_cells: Cell[>..] = [];
-        let total = (nc as i64) * nr;
-        for _ in 0..total { next_cells.push(b); }
-        let min_r = if nr < s.rows { nr } else { s.rows };
-        for r in 0..min_r {
-            let src = (r as i64) * s.cols;
-            let dst = (r as i64) * nc;
-            for c in 0..s.cols { next_cells[dst + c] = s.cells[src + c]; }
-        }
-        s.cells.clear();
-        for i in 0..total { s.cells.push(next_cells[i]); }
-        s.alt_cells.clear();
-        for _ in 0..total { s.alt_cells.push(b); }
-        s.rows = nr;
-        s.scroll_top = 0; s.scroll_bottom = nr - 1;
-        clamp_cursor(s);
-
-        var next_prompts: u8[>..] = [];
-        var next_wrapped: u8[>..] = [];
-        for r in 0..nr {
-            if r < s.prompt_rows.len {
-                next_prompts.push(s.prompt_rows[r]);
-            } else {
-                next_prompts.push(0);
-            }
-            if r < s.wrapped_rows.len {
-                next_wrapped.push(s.wrapped_rows[r]);
-            } else {
-                next_wrapped.push(0);
-            }
-        }
         s.prompt_rows.clear();
         s.wrapped_rows.clear();
-        for r in 0..nr {
-            s.prompt_rows.push(next_prompts[r]);
-            s.wrapped_rows.push(next_wrapped[r]);
-        }
-
         s.dirty_rows.clear();
-        for _ in 0..nr { s.dirty_rows.push(2); }
-        reset_tabs(s);
+        for _ in 0..nr {
+            s.prompt_rows.push(0);
+            s.wrapped_rows.push(0);
+            s.dirty_rows.push(2);
+        }
         s.sel_active = false;
         s.full_redraw_frames = 2;
         return;
     }
 
-    // Full column reflow: collect logical lines from scrollback + live screen
+    // Normal screen reflow:
+    // 1. Determine active content boundary on the live screen.
+    // Any trailing blank rows strictly below max(cursor_y, last_non_space_row)
+    // are empty padding and must NOT be collected into logical lines or pushed into scrollback!
+    var max_live_row = s.cy;
+    if max_live_row < 0 { max_live_row = 0; }
+    if max_live_row >= s.rows { max_live_row = s.rows - 1; }
+    for r in (max_live_row + 1)..s.rows {
+        let pr = phys_row(s, r);
+        let base = (pr as i64) * s.cols;
+        var has_content = false;
+        for c in 0..s.cols {
+            let cell = s.cells[base + c];
+            if cell.cp != 0x20 || cell.attrs != 0 || cell.combining != 0 || cell.link_id != 0 {
+                has_content = true;
+                break;
+            }
+        }
+        if has_content {
+            max_live_row = r;
+        }
+    }
+
+    let live_lines_count = max_live_row + 1;
+    let total_src_lines = s.sb_count + live_lines_count;
+    let cursor_abs_r = s.sb_count + s.cy;
+
     var logical_lines: Cell[>..] = [];
     var line_offsets: i32[>..] = [];
     var line_lengths: i32[>..] = [];
     var line_prompts: u8[>..] = [];
 
-    let total_src_lines = s.sb_count + s.rows;
+    var cursor_line_idx: i32 = -1;
+    var cursor_char_offset: i32 = -1;
+
     var line_start: i64 = 0;
     var cur_line_len: i32 = 0;
     var cur_line_prompt: u8 = 0;
@@ -933,12 +920,22 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
                 row_end -= 1;
             }
         }
+
+        // If cursor is on this physical line, don't trim past the cursor's column!
+        if abs_r == cursor_abs_r {
+            let cur_col = if s.cx < 0 { 0 } else if s.cx >= cols_in_row { cols_in_row - 1 } else { s.cx };
+            let offset_col = if s.wrap_pending && cur_col == cols_in_row - 1 { cols_in_row } else { cur_col };
+            if row_end < offset_col { row_end = offset_col; }
+            cursor_line_idx = line_lengths.len as i32;
+            cursor_char_offset = cur_line_len + offset_col;
+        }
+
         for c in 0..row_end {
             logical_lines.push(history_cell(s, abs_r, c));
             cur_line_len += 1;
         }
 
-        if is_wrapped == 0 {
+        if is_wrapped == 0 || abs_r == total_src_lines - 1 {
             line_offsets.push(line_start as i32);
             line_lengths.push(cur_line_len);
             line_prompts.push(cur_line_prompt);
@@ -948,14 +945,24 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
         }
     }
 
+    // 2. Reflow logical lines into new column width nc
     var reflowed_rows: Cell[>..] = [];
     var reflowed_wrapped: u8[>..] = [];
     var reflowed_prompts: u8[>..] = [];
+    var cursor_reflowed_row: i32 = -1;
+    var cursor_reflowed_col: i32 = 0;
 
     for l in 0..line_lengths.len {
         let off = line_offsets[l] as i64;
         let len = line_lengths[l];
         let pmt = line_prompts[l];
+        let line_start_row = reflowed_wrapped.len as i32;
+
+        if l == cursor_line_idx {
+            let sub = if cursor_char_offset >= 0 { cursor_char_offset / nc } else { 0 };
+            cursor_reflowed_row = line_start_row + sub;
+            cursor_reflowed_col = if cursor_char_offset >= 0 { cursor_char_offset % nc } else { 0 };
+        }
 
         if len == 0 {
             for _ in 0..nc { reflowed_rows.push(b); }
@@ -984,16 +991,33 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
         }
     }
 
+    if cursor_reflowed_row < 0 {
+        cursor_reflowed_row = 0;
+        cursor_reflowed_col = 0;
+    }
+    let max_reflow_idx = if reflowed_wrapped.len > 0 { (reflowed_wrapped.len as i32) - 1 } else { 0 };
+    if cursor_reflowed_row > max_reflow_idx {
+        cursor_reflowed_row = max_reflow_idx;
+        cursor_reflowed_col = nc - 1;
+    }
+    if cursor_reflowed_col >= nc { cursor_reflowed_col = nc - 1; }
+    if cursor_reflowed_col < 0 { cursor_reflowed_col = 0; }
+
+    // 3. Anchoring viewport and scrollback:
     let total_reflowed = reflowed_wrapped.len as i32;
-    var live_start_row = total_reflowed - nr;
-    if live_start_row < 0 { live_start_row = 0; }
+    var live_start_row: i32 = 0;
+    if total_reflowed > nr {
+        live_start_row = total_reflowed - nr;
+        if cursor_reflowed_row < live_start_row {
+            live_start_row = cursor_reflowed_row;
+        }
+    }
     let sb_count = live_start_row;
 
     s.cols = nc; s.rows = nr;
     s.sb_cols = nc;
     s.sb_head = 0;
     s.sb_count = if sb_count > s.sb_cap_lines { s.sb_cap_lines } else { sb_count };
-    s.view_offset = 0;
 
     s.cells.clear();
     s.wrapped_rows.clear();
@@ -1026,7 +1050,7 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
     s.sb_cols = nc;
     s.sb_head = 0;
     s.sb_count = 0;
-    if s.sb_cap_lines > 0 {
+    if s.sb_cap_lines > 0 && sb_count > 0 {
         let sb_take_start = if sb_count > s.sb_cap_lines { sb_count - s.sb_cap_lines } else { 0 };
         let sb_take_count = sb_count - sb_take_start;
         for i in 0..sb_take_count {
@@ -1043,9 +1067,18 @@ fn resize(s: Screen&, new_cols: i32, new_rows: i32) {
         s.sb_count = sb_take_count;
     }
 
+    s.cy = cursor_reflowed_row - live_start_row;
+    s.cx = cursor_reflowed_col;
+    clamp_cursor(s);
+    if s.cx > 0 && s.cells[(s.cy as i64) * nc + s.cx].flags == CELL_WIDE_CONT {
+        s.cx -= 1;
+    }
+
+    if s.view_offset > s.sb_count {
+        s.view_offset = s.sb_count;
+    }
     s.scroll_top = 0; s.scroll_bottom = nr - 1;
     s.wrap_pending = false;
-    clamp_cursor(s);
     reset_tabs(s);
     s.sel_active = false;
     s.full_redraw_frames = 2;

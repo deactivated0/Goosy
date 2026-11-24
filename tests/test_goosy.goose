@@ -549,6 +549,72 @@ fn test_selection_scroll_and_multiscreen() {
     assert(scr.sb_count == 6);
 }
 
+fn test_maximize_restore_preservation() {
+    var pal = colors::default_palette();
+    var scr = screen::Screen { .. };
+    screen::init(scr, 80, 24, pal.fg, pal.bg, 100, 0);
+    var par = parser::Parser { .. };
+
+    // 1. Terminal with 3 lines of output and trailing blank rows
+    parser::feed_slice(par, scr, pal, "echo hello\r\nhello\r\n$ ");
+    assert(scr.cy == 2 && scr.cx == 2);
+    assert(scr.sb_count == 0);
+    assert(screen::visible_cell(scr, 0, 0).cp == 'e');
+    assert(screen::visible_cell(scr, 0, 1).cp == 'h');
+    assert(screen::visible_cell(scr, 0, 2).cp == '$');
+
+    // Maximize window to 160x50:
+    screen::resize(scr, 160, 50);
+    assert(scr.cols == 160 && scr.rows == 50);
+    // Cursor MUST remain on the prompt line ($ )
+    assert(scr.cy == 2 && scr.cx == 2);
+    // Content must NOT be duplicated or pushed into scrollback
+    assert(scr.sb_count == 0);
+    assert(screen::visible_cell(scr, 0, 0).cp == 'e');
+    assert(screen::visible_cell(scr, 0, 1).cp == 'h');
+    assert(screen::visible_cell(scr, 0, 2).cp == '$');
+    // Row 3 and beyond must be blank
+    assert(screen::visible_cell(scr, 0, 3).cp == 0x20);
+    assert(screen::visible_cell(scr, 0, 49).cp == 0x20);
+
+    // Restore window back to 80x24:
+    screen::resize(scr, 80, 24);
+    assert(scr.cols == 80 && scr.rows == 24);
+    assert(scr.cy == 2 && scr.cx == 2);
+    assert(scr.sb_count == 0);
+    assert(screen::visible_cell(scr, 0, 0).cp == 'e');
+    assert(screen::visible_cell(scr, 0, 1).cp == 'h');
+    assert(screen::visible_cell(scr, 0, 2).cp == '$');
+
+    // Maximize again: must still be completely stable
+    screen::resize(scr, 160, 50);
+    assert(scr.cy == 2 && scr.cx == 2);
+    assert(scr.sb_count == 0);
+    assert(screen::visible_cell(scr, 0, 2).cp == '$');
+    screen::resize(scr, 80, 24);
+    assert(scr.cy == 2 && scr.cx == 2);
+    assert(scr.sb_count == 0);
+
+    // 2. Wrapped command line reflow and cursor tracking
+    var wrap_scr = screen::Screen { .. };
+    screen::init(wrap_scr, 40, 10, pal.fg, pal.bg, 50, 0);
+    var wrap_par = parser::Parser { .. };
+    // Type a 60-character line (wraps across 40 cols: 40 on row 0, 20 on row 1)
+    parser::feed_slice(wrap_par, wrap_scr, pal, "012345678901234567890123456789012345678901234567890123456789");
+    assert(wrap_scr.cy == 1 && wrap_scr.cx == 20);
+    assert(wrap_scr.wrapped_rows[0] == 1);
+
+    // Maximize to 80 cols: the 60 characters unwrap to fit on row 0!
+    screen::resize(wrap_scr, 80, 20);
+    assert(wrap_scr.wrapped_rows[0] == 0);
+    assert(wrap_scr.cy == 0 && wrap_scr.cx == 60);
+
+    // Restore to 40 cols: wraps back to 2 rows, cursor at row 1 col 20!
+    screen::resize(wrap_scr, 40, 10);
+    assert(wrap_scr.wrapped_rows[0] == 1);
+    assert(wrap_scr.cy == 1 && wrap_scr.cx == 20);
+}
+
 fn main() {
     test_utf8_decoding();
     test_osc7_and_osc133_prompt_jumps();
@@ -563,5 +629,6 @@ fn main() {
     test_kitty_keyboard_protocol();
     test_command_output_selection_and_combining();
     test_selection_scroll_and_multiscreen();
+    test_maximize_restore_preservation();
     print("goosy: all Goose unit tests passed");
 }
